@@ -6,19 +6,36 @@ pub struct U32LiteralExpression {
     pub value: u32,
 }
 
-
 impl Expression for U32LiteralExpression {
     fn evaluate(&self) -> ValueType {
         ValueType::U32(self.value)
     }
 
     fn try_evaluate_type(&self) -> Option<TypeInfo> {
-        Some(TypeInfo {
-            name: "u32".to_owned(),
-            size: 4,
-            needs_to_resolve_size: false,
-            has_been_resolved: true,
+        Some(TypeInfo::unsigned_32bit())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct U64LiteralExpression {
+    pub value: u64,
+}
+
+impl U64LiteralExpression {
+    pub fn into_expr(value: u64) -> Box<dyn Expression> {
+        Box::new(U64LiteralExpression {
+            value
         })
+    }
+}
+
+impl Expression for U64LiteralExpression {
+    fn evaluate(&self) -> ValueType {
+        ValueType::U64(self.value)
+    }
+
+    fn try_evaluate_type(&self) -> Option<TypeInfo> {
+        Some(TypeInfo::unsigned_64bit())
     }
 }
 
@@ -33,34 +50,72 @@ impl Expression for I32LiteralExpression {
     }
 
     fn try_evaluate_type(&self) -> Option<TypeInfo> {
-        Some(TypeInfo {
-            name: "i32".to_owned(),
-            size: 4,
-            needs_to_resolve_size: false,
-            has_been_resolved: true,
+        Some(TypeInfo::signed_32bit())
+    }
+}
+
+impl I32LiteralExpression {
+    pub fn into_expr(value: i32) -> Box<dyn Expression> {
+        Box::new(I32LiteralExpression {
+            value
+        })
+    }
+}
+
+impl U32LiteralExpression {
+    pub fn into_expr(value: u32) -> Box<dyn Expression> {
+        Box::new(U32LiteralExpression {
+            value
         })
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct U64LiteralExpression {
-    pub value: u64,
+pub struct BoolLiteralExpression {
+    pub value: bool,
 }
 
-impl Expression for U64LiteralExpression {
+impl Expression for BoolLiteralExpression {
     fn evaluate(&self) -> ValueType {
-        ValueType::U64(self.value)
+        ValueType::Bool(self.value)
     }
 
     fn try_evaluate_type(&self) -> Option<TypeInfo> {
-        Some(TypeInfo {
-            name: "u64".to_owned(),
-            size: 8,
-            needs_to_resolve_size: false,
-            has_been_resolved: true,
+        Some(TypeInfo::boolean())
+    }
+}
+
+impl BoolLiteralExpression {
+    pub fn into_expr(value: bool) -> Box<dyn Expression> {
+        Box::new(BoolLiteralExpression {
+            value
         })
     }
 }
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CharLiteralExpression {
+    pub value: char,
+}
+
+impl Expression for CharLiteralExpression {
+    fn evaluate(&self) -> ValueType {
+        ValueType::Char(self.value)
+    }
+
+    fn try_evaluate_type(&self) -> Option<TypeInfo> {
+        Some(TypeInfo::character())
+    }
+}
+
+impl CharLiteralExpression {
+    pub fn into_expr(value: char) -> Box<dyn Expression> {
+        Box::new(CharLiteralExpression {
+            value
+        })
+    }
+}
+
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct I64LiteralExpression {
@@ -78,6 +133,14 @@ impl Expression for I64LiteralExpression {
             size: 8,
             needs_to_resolve_size: false,
             has_been_resolved: true,
+        })
+    }
+}
+
+impl I64LiteralExpression {
+    pub fn into_expr(value: i64) -> Box<dyn Expression> {
+        Box::new(I64LiteralExpression {
+            value
         })
     }
 }

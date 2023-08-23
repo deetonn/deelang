@@ -1,7 +1,7 @@
 
 use std::path::Path;
 
-use crate::{Lexer, parser::Parser};
+use crate::{Lexer, parser::parse};
 
 /* this module exists to make running scripts easier. */
 
@@ -12,8 +12,10 @@ fn private_run_script(script_file: &str) -> Result<(), String> {
     };
     let mut lexer = Lexer::new(source, None);
     lexer.lex();
-    let mut parser = Parser::new(lexer.tokens);
-    parser.parse();
+
+    let result = parse(lexer.tokens);
+    println!("result: {:#?}", result);
+
     Ok(())
 }
 

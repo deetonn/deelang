@@ -14,6 +14,16 @@ pub struct Token {
     pub location: SourceLocation,
 }
 
+impl Clone for Token {
+    fn clone(&self) -> Self {
+        Token {
+            token_type: self.token_type.clone(),
+            span: self.span.clone(),
+            location: self.location.clone(),
+        }
+    }
+}
+
 impl Token {
     pub fn try_as_ident(&self) -> Option<&str> {
         match &self.token_type {

@@ -1,1 +1,1 @@
-const data: u32 = call_function();
+let a: char = 152552

@@ -1,11 +1,23 @@
 pub mod ast_node;
 pub mod expressions;
 
+use std::sync::{Arc, Mutex};
+use std::cell::Cell;
+
 use ast_node::*;
 use crate::tokenizer::{Token, SourceLocation, token_type::TokenType};
 use crate::err::display_fatal;
 
 use expressions::*;
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ParserError {
+    // expected `something`
+    ExpectedXXX(String),
+    // Signifies that the parser has finished parsing the file
+    Done,
+    NotImplemented,
+}
 
 trait FilterForExpression {
     fn filter_for_expression(&self, current_pos: usize, terminator: Option<TokenType>) -> Option<Vec<Token>>;
@@ -41,284 +53,271 @@ impl FilterForExpression for &Vec<Token> {
     }
 }
 
-pub struct Parser {
-    pub ast: Vec<AstNode>,
+pub struct ParseContext {
     pub tokens: Vec<Token>,
-    pub current: usize,
+    pub position: Cell<usize>,
 }
 
-macro_rules! take_or_fail {
-    // This macro just replaces the following code:
-    // let token = match self.next() {
-    //     Some(token) => token.clone(),
-    //     None => display_fatal(SourceLocation::default(), "Expected identifier after let.")
-    // };
-    // with this:
-    // let token = pofb!(self.next(), "Expected identifier after let.");
-    ($self: ident, $expr:expr, $message:expr) => {
-        match $expr {
-            Some(token) => {
-                token.clone()
-            },
-            None => display_fatal(&SourceLocation::default(), $message),
+pub struct ExpressionContext<'a> {
+    pub typ: &'a Option<TypeInfo>,
+}
+
+impl ParseContext {
+    fn advance(&self) -> Option<&Token> {
+        let pos = self.position.get();
+        if pos >= self.tokens.len() {
+            return None;
         }
-    };
-}
-
-pub struct ExpressionInput<'a> {
-    pub tokens: &'a Vec<Token>,
-    pub position: &'a mut usize,
-    pub type_info: Option<TypeInfo>,
-}
-
-impl<'a> ExpressionInput<'a> {
-    pub fn new(tokens: &'a Vec<Token>, position: &'a mut usize) -> ExpressionInput<'a> {
-        ExpressionInput {
-            tokens,
-            position,
-            type_info: None,
-        }
+        self.position.set(pos + 1);
+        Some(&self.tokens[pos])
     }
 
-    pub fn with_type_info(tokens: &'a Vec<Token>, position: &'a mut usize, type_info: Option<TypeInfo>) -> ExpressionInput<'a> {
-        ExpressionInput {
-            tokens,
-            position,
-            type_info,
+    fn peek(&self) -> Option<&Token> {
+        let pos = self.position.get();
+        if pos >= self.tokens.len() {
+            return None;
         }
+        Some(&self.tokens[pos])
+    }
+
+    fn get_source_location(&self) -> SourceLocation {
+        let pos = self.position.get();
+        if pos >= self.tokens.len() {
+            return SourceLocation {
+                file: String::new(),
+                line: 0,
+                column: 0,
+            };
+        }
+        self.tokens[pos].location.clone()
     }
 }
 
-pub fn parse_inferred_number_expression(num: usize) -> Box<dyn Expression> {
-    // if the number is not negative, its automatically unsigned.
-    // if this unsigned number is larger than u32::MAX, it will be interpreted as u64.
-    // otherwise, it will be interpreted as u32. Currently signed numbers cannot work.
-    if num <= std::u32::MAX as usize {
-        return Box::new(U32LiteralExpression {
-            value: num as u32,
-        });
-    }
-    else {
-        return Box::new(U64LiteralExpression {
-            value: num as u64,
-        });
-    }
+pub fn matches(token: &Token, typ: TokenType) -> bool {
+    token.token_type == typ
 }
 
-pub fn parse_expression(input: ExpressionInput, terminator: Option<TokenType>) -> Option<Box<dyn Expression>> {
-    // collect all the tokens until we reach a semicolon
-    // then parse the expression
-    let expression_tokens = input.tokens.filter_for_expression(*input.position, terminator)?;
+pub fn parse_typename(context: &ParseContext) -> Option<TypeInfo> {
+    let next = context.advance()?;
 
-    let is_simple = expression_tokens.len() == 1;
-
-    if is_simple {
-        let simple_token = &expression_tokens[0];
-
-        if let TokenType::Identifier(spelling) = simple_token.token_type.clone() {
-            return Some(Box::new(VariableReferenceExpression {
-                name: spelling.clone(),
-                assigne_type: input.type_info.clone(),
-            }));
-        }
-
-        if let TokenType::Number(num) = simple_token.token_type.clone() {
-            if let Some(type_info) = input.type_info {
-                if type_info.name == "u32" {
-                    return Some(Box::new(U32LiteralExpression {
-                        value: num as u32,
-                    }));
-                }
-                if type_info.name == "i32" {
-                    return Some(Box::new(I32LiteralExpression {
-                        value: num as i32,
-                    }));
-                }
-            }
-            else {
-                return Some(parse_inferred_number_expression(num));
-            }
-        }
-
-        panic!("unhandled simple expression: {:?}", simple_token.token_type);
-    }
-
-    /* The expression is not simple, parse individual branches */
-
-    /* If the expression begins with an identifier, it can either be:
-         1. A function call
-         2. A chaining `.` operator
-    */
-
-    // for function calls we expect <ident><open_paren><expressions...><close_paren>
-
-    let first: &Token = &expression_tokens[0];
-    if let TokenType::Identifier(first) = &first.token_type {
-        let possible_paren = &expression_tokens[1];
-        if let TokenType::LeftParen = possible_paren.token_type {
-            let mut current_index = 2;
-            let mut expressions = Vec::new();
-            while let Some(token) = expression_tokens.get(current_index) {
-                if let TokenType::RightParen = token.token_type {
-                    break;
-                }
-                let expr = parse_expression(
-                    ExpressionInput::new(&expression_tokens, &mut current_index), 
-                    Some(TokenType::Comma));
-                if let Some(expr) = expr {
-                    expressions.push(expr);
-                }
-                else {
-                    display_fatal(&token.location, "Expected expression after comma.");
-                }
-                current_index += 1;
-            }
-            return Some(Box::new(FunctionCallExpression {
-                name: first.clone(),
-                arguments: expressions,
-            }));
-        }
-    }
-    unimplemented!("unhandled expression: {:?}", expression_tokens);
-}
-
-pub fn parse_type_annotation(tokens: &Vec<Token>, position: &mut usize) -> Option<TypeInfo> {
-    let current_token = &tokens[*position];
-    let mut info = match current_token.token_type {
-        TokenType::Identifier(_) => {
-            *position += 1;
+    match &next.token_type {
+        TokenType::Identifier(ident) => {
             Some(TypeInfo {
-                name: match current_token.token_type.clone() {
-                    TokenType::Identifier(name) => name.clone(),
-                    _ => display_fatal(&current_token.location, "Expected identifier after colon."),
-                },
+                name: ident.clone(),
                 size: 0,
-                /* The size will be resolved once types have been verified. */
-                /* This needs to happen just before interpreting. */
                 needs_to_resolve_size: true,
-                has_been_resolved: true,
+                has_been_resolved: false,
             })
         },
         _ => None,
-    }?;
-
-    info.try_resolve_size();
-    Some(info)
+    }
 }
 
-pub struct ParseResult {
-    pub node: AstNode,
-    pub next_index: usize,
-}
-
-impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Parser {
-        Parser {
-            ast: Vec::new(),
-            tokens,
-            current: 0,
-        }
-    }
-
-    pub fn parse(&mut self) {
-        while self.current_token(self.current).is_some() {
-            let statement = self.parse_statement();
-            dbg!(&statement);
-            self.ast.push(statement);
-        }
-    }
-
-    // utility
-
-    fn parse_statement(&mut self) -> AstNode {
-        let current_index = self.current.clone();
-        let mut prev_result: Option<ParseResult> = None;
-
-        if self.matches(TokenType::Let, current_index) {
-            self.current += 1;
-            prev_result = Some(self.parse_assignment(false));
-        }
-        if self.matches(TokenType::Const, current_index) {
-            self.current += 1;
-            prev_result = Some(self.parse_assignment(true));
-        }
-
-        if let Some(result) = prev_result {
-            self.current = result.next_index;
-            return result.node;
-        }
-
-        todo!("add more statements: current token: {:?}", self.current_token(self.current));
-    }
-
-    // TODO: fix this shit, so many mutable this mutable that I DONT UNDERSTAND
-    fn parse_assignment(&mut self, is_const: bool) -> ParseResult {
-        let mut current_index = self.current.clone();
-
-        let name = take_or_fail!(self, self.next(current_index), "Expected identifier after let.");
-        current_index += 1;
-        let mut annotation: Option<TypeInfo> = None;
-
-        if self.matches(TokenType::Colon, current_index) {
-            current_index += 1;
-            annotation = parse_type_annotation(&self.tokens, &mut current_index);
-        }
-
-        let _: &Token = take_or_fail!(self, self.next(current_index), "Expected equals sign after identifier.");
-        current_index += 1;
-        let expr = parse_expression(
-            ExpressionInput::with_type_info(&self.tokens, &mut current_index, annotation.clone()), 
-            Some(TokenType::Semicolon));
-
-        /* If no type annotation is present, try to evaluate the type via the expression */
-        if let Some(expression) = &expr {
-            if annotation.is_none() {
-                annotation = expression.try_evaluate_type();
+pub fn check_integral_cast(from: usize, info: &TypeInfo) -> Result<Box<dyn Expression>, ParserError> {
+    match info.name.as_str() {
+        "bool" => {
+            if from > 1 {
+                return Err(ParserError::ExpectedXXX(format!("expected bool, found `{}`", from)));
             }
+            return Ok(
+                BoolLiteralExpression::into_expr(from == 1)
+            )
+        },
+        "char" => {
+            if from > u8::MAX as usize {
+                return Err(ParserError::ExpectedXXX(format!("expected char, found `{}`", from)));
+            }
+            return Ok(
+                CharLiteralExpression::into_expr(from as u8 as char)
+            )
+        },
+        "char" => {
+            if from > u8::MAX as usize {
+                return Err(ParserError::ExpectedXXX(format!("expected char, found `{}`", from)));
+            }
+            return Ok(
+                CharLiteralExpression::into_expr(from as u8 as char)
+            )
+        },
+        "i32" => {
+            if from > i32::MAX as usize {
+                return Err(ParserError::ExpectedXXX(format!("expected i32, found `{}`", from)));
+            }
+            return Ok(
+                I32LiteralExpression::into_expr(from as i32)
+            )
+        },
+        "u32" => {
+            if from > u32::MAX as usize {
+                return Err(ParserError::ExpectedXXX(format!("expected u32, found `{}`", from)));
+            }
+            return Ok(
+                U32LiteralExpression::into_expr(from as u32)
+            )
+        },
+        "i64" => {
+            if from > i64::MAX as usize {
+                return Err(ParserError::ExpectedXXX(format!("expected i64, found `{}`", from)));
+            }
+            return Ok(
+                I64LiteralExpression::into_expr(from as i64)
+            )
+        },
+        "u64" => {
+            if from > u64::MAX as usize {
+                return Err(ParserError::ExpectedXXX(format!("expected u64, found `{}`", from)));
+            }
+            return Ok(
+                U64LiteralExpression::into_expr(from as u64)
+            )
+        },
+        _ => {
+            return Err(ParserError::ExpectedXXX(format!("expected integral type, found `{}`", info.name)));
         }
+    }
+}
 
-        if annotation.is_none() {
-            dbg!(&expr);
-            display_fatal(&name.location, "This declaration requires a type annotation. The type could not be inferred.");
+pub fn parse_number_expression(context: &ParseContext,
+     number: usize, 
+     expr_context: &ExpressionContext
+) -> Result<AstNode, ParserError> {
+    if let Some(requested_type) = &expr_context.typ {
+        // The user wants this to be a specific type, so we should try to parse it as that type.
+        if !requested_type.is_builtin_integral() {
+            return Err(ParserError::ExpectedXXX(format!("expected integral type, found `{}`", requested_type.name)));
         }
+        return match check_integral_cast(number, requested_type) {
+            Ok(expr) => {
+                Ok(
+                    AstNode::Expression(
+                        expr
+                    )
+                )
+            },
+            Err(err) => Err(err),
+        };
+    }
+    else {
+        // We try to infer the type from the expression itself
+        if number > u32::MAX as usize {
+            // The number is too big to fit in a u32, so we should use an i64
+            return Ok(
+                AstNode::Expression(
+                    U64LiteralExpression::into_expr(number as u64)
+                )
+            )
+        }
+        else {
+            // The number is small enough to fit in a u32, so we should use an i32
+            return Ok(
+                AstNode::Expression(
+                    U32LiteralExpression::into_expr(number as u32)
+                )
+            )
+        }
+    }
+}
 
-        let name_token = name.clone();
-        return ParseResult { 
-            node: AstNode::Assignment(AssignmentFacts {
-                is_const,
-                name: match name.token_type.clone() {
-                    TokenType::Identifier(name) => name.clone(),
-                    _ => display_fatal(&name_token.location, "Expected identifier after let."),
-                },
+pub fn parse_expression(context: &ParseContext, expr_context: &ExpressionContext) -> Result<AstNode, ParserError> {
+    let next_token = match context.advance() {
+        Some(token) => token,
+        None => return Err(ParserError::ExpectedXXX("expected expression".to_owned())),
+    };
+
+    match &next_token.token_type {
+        TokenType::Number(num) => parse_number_expression(context, num.clone(), expr_context),
+        _ => todo!("unimplemented expression type")
+    }
+}
+
+pub fn parse_assignment(context: &ParseContext, constant: bool) -> Result<AstNode, ParserError> {
+    let identifier = match context.advance() {
+        Some(Token { token_type: TokenType::Identifier(ident), .. }) => ident,
+        _ => return Err(ParserError::ExpectedXXX(format!("expected identifier after `{}`", if constant { "const" } else { "let" }))),
+    }; 
+
+    let mut annotation: Option<TypeInfo> = None;
+
+    if let Some(colon) = context.peek() {
+        if matches(colon, TokenType::Colon) {
+            context.advance();
+            annotation = parse_typename(context);
+        }
+    }
+
+    // equals
+    let _ = match context.advance() {
+        Some(Token { token_type: TokenType::Equal, .. }) => true,
+        _ => return Err(ParserError::ExpectedXXX(format!("Expected `=` after identifier `{}`", identifier))),
+    };
+
+    let expr_context = ExpressionContext {
+        typ: &annotation,
+    };
+
+    let expression = parse_expression(context, &expr_context)?;
+
+    let expression_storage = match expression {
+        AstNode::Expression(expr) => {
+            if annotation.is_none() {
+                if let Some(typ) = &expr.try_evaluate_type() {
+                    annotation = Some(typ.clone());
+                }
+            }
+            Some(expr)
+        },
+        _ => None
+    };
+
+    return Ok(
+        AstNode::Assignment(
+            AssignmentFacts {
+                name: identifier.clone(),
                 type_info: annotation,
-                value: match expr {
+                constant,
+                expression: match expression_storage {
                     Some(expr) => expr,
-                    None => display_fatal(&name_token.location, "Expected expression after equals sign."),
+                    None => panic!("invalid expression")
                 },
-        }), next_index: current_index };
+            }
+        )
+    )
+}
+
+pub fn parse_statement(context: &ParseContext) -> Result<AstNode, ParserError> {
+    let next = match context.advance() {
+        Some(next) => next,
+        None => return Err(ParserError::ExpectedXXX("statement".to_owned())),
+    };
+    println!("next: {:?}", next);
+
+    if matches(next, TokenType::Let) {
+        return parse_assignment(context, false);
     }
 
-    fn peek(&self, ahead: usize, pos: usize) -> Option<&Token> {
-        let index = pos + ahead;
-        if index >= self.tokens.len() {
-            return None;
-        }
-        Some(&self.tokens[index])
+    if matches(next, TokenType::Const) {
+        return parse_assignment(context, true);
     }
 
-    fn current_token(&self, pos: usize) -> Option<&Token> {
-        self.peek(0, pos)
+    Err(ParserError::ExpectedXXX("expected statement".to_owned()))
+}
+
+pub fn parse(toks: Vec<Token>) -> Vec<AstNode> {
+    let context = ParseContext {
+        tokens: toks,
+        position: Cell::new(0),
+    };
+
+    let mut nodes: Vec<AstNode> = Vec::new();
+
+    let stmt = parse_statement(&context);
+    if let Ok(stmt) = stmt {
+        nodes.push(stmt);
+    }
+    else {
+        display_fatal(&context.get_source_location(), 
+            &format!("failed to parse statement: {:?}", stmt));
     }
 
-    fn next(&self, pos: usize) -> Option<&Token> {
-        self.current_token(pos)
-    }
-
-    fn matches(&self, token_type: TokenType, pos: usize) -> bool {
-        if self.peek(0, pos).unwrap_or(&Token::default()).token_type == token_type {
-            return true;
-        }
-        false
-    }
-
+    nodes
 }

@@ -99,6 +99,10 @@ impl Lexer {
                         self.position += 1;
                         self.make_token(TokenType::MinusEqual)
                     }
+                    else if self.peek(1).unwrap_or('\0') == CROC_CLOSE {
+                        self.position += 1;
+                        self.make_token(TokenType::Arrow)
+                    }
                     else {
                         self.make_token(TokenType::Minus)
                     }

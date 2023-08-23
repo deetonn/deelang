@@ -4,6 +4,16 @@ use std::{sync::Mutex, collections::HashMap};
 
 use super::expressions::{VariableReferenceExpression, FunctionCallExpression};
 
+trait VecExt<T> {
+    fn internal_copy(&self) -> Vec<T>;
+}
+
+impl<T: Clone> VecExt<T> for Vec<T> {
+    fn internal_copy(&self) -> Vec<T> {
+        self.to_vec()
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypeInfo {
     pub name: String,
@@ -13,6 +23,161 @@ pub struct TypeInfo {
     /* This field describes if the type has any information about it yet. */
     /* This does not tell you that the type exists, only whether we have info about it yet. */
     pub has_been_resolved: bool,
+}
+
+impl TypeInfo {
+    pub fn serialize(&self) -> String {
+        return match &self.name {
+            name if name == "u32" => ".32u".to_owned(),
+            name if name == "i32" => ".32".to_owned(),
+            name if name == "u64" => ".64u".to_owned(),
+            name if name == "i64" => ".64".to_owned(),
+            name if name == "f32" => ".f4".to_owned(),
+            name if name == "f64" => ".f8".to_owned(),
+            name if name == "bool" => ".1".to_owned(),
+            name if name == "char" => ".1c".to_owned(),
+            name if name == "string" => ".S".to_owned(),
+            name if name == "void" => ".V".to_owned(),
+            name if name == "size_t" => ".st_86".to_owned(),
+            _ => self.name.clone(),
+        }
+    }
+
+    pub fn void() -> TypeInfo {
+        TypeInfo {
+            name: "void".to_owned(),
+            size: 0,
+            needs_to_resolve_size: false,
+            has_been_resolved: true,
+        }
+    }
+
+    pub fn unsigned_32bit() -> TypeInfo {
+        TypeInfo {
+            name: "u32".to_owned(),
+            size: 4,
+            needs_to_resolve_size: false,
+            has_been_resolved: true,
+        }
+    } 
+
+    pub fn signed_32bit() -> TypeInfo {
+        TypeInfo {
+            name: "i32".to_owned(),
+            size: 4,
+            needs_to_resolve_size: false,
+            has_been_resolved: true,
+        }
+    }
+
+    pub fn unsigned_64bit() -> TypeInfo {
+        TypeInfo {
+            name: "u64".to_owned(),
+            size: 8,
+            needs_to_resolve_size: false,
+            has_been_resolved: true,
+        }
+    }
+
+    pub fn signed_64bit() -> TypeInfo {
+        TypeInfo {
+            name: "i64".to_owned(),
+            size: 8,
+            needs_to_resolve_size: false,
+            has_been_resolved: true,
+        }
+    }
+
+    pub fn float_32bit() -> TypeInfo {
+        TypeInfo {
+            name: "f32".to_owned(),
+            size: 4,
+            needs_to_resolve_size: false,
+            has_been_resolved: true,
+        }
+    }
+
+    pub fn float_64bit() -> TypeInfo {
+        TypeInfo {
+            name: "f64".to_owned(),
+            size: 8,
+            needs_to_resolve_size: false,
+            has_been_resolved: true,
+        }
+    }
+
+    pub fn boolean() -> TypeInfo {
+        TypeInfo {
+            name: "bool".to_owned(),
+            size: 1,
+            needs_to_resolve_size: false,
+            has_been_resolved: true,
+        }
+    }
+
+    pub fn character() -> TypeInfo {
+        TypeInfo {
+            name: "char".to_owned(),
+            size: 1,
+            needs_to_resolve_size: false,
+            has_been_resolved: true,
+        }
+    }
+
+    pub fn is_builtin_integral(&self) -> bool {
+        return match &self.name[..] {
+            "u32" | "i32" | "u64" | "i64" | "bool" | "char" => true,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Signature {
+    pub name: String,
+    pub return_type: TypeInfo,
+    pub arguments: Vec<TypeInfo>,
+}
+
+impl Clone for Signature {
+    fn clone(&self) -> Self {
+        Signature {
+            name: self.name.clone(),
+            return_type: self.return_type.clone(),
+            arguments: self.arguments.internal_copy(),
+        }
+    }
+}
+
+impl Signature {
+    pub fn new(name: &String, return_type: &TypeInfo, arguments: Vec<TypeInfo>) -> Signature {
+        Signature {
+            name: name.clone(),
+            return_type: return_type.clone(),
+            arguments: arguments.internal_copy(),
+        }
+    }
+
+    pub fn serialize(&self) -> String {
+        let mut result = String::new();
+
+        result.push_str(&self.name);
+        result.push_str("@");
+        result.push_str(&self.return_type.serialize());
+
+        for item in self.arguments.iter() {
+            result.push_str("@");
+            result.push_str(&item.serialize());
+        }
+
+        result
+    }
+}
+
+impl PartialEq for Signature {
+    fn eq(&self, other: &Self) -> bool {
+        return self.serialize() == other.serialize();
+    }
 }
 
 impl TypeInfo {
@@ -136,6 +301,31 @@ pub struct StructField {
     pub value: ValueType
 }
 
+impl Clone for StructField {
+    fn clone(&self) -> Self {
+        StructField {
+            name: self.name.clone(),
+            type_info: self.type_info.clone(),
+            value: match &self.value {
+                ValueType::U32(value) => ValueType::U32(value.clone()),
+                ValueType::I32(value) => ValueType::I32(value.clone()),
+                ValueType::U64(value) => ValueType::U64(value.clone()),
+                ValueType::I64(value) => ValueType::I64(value.clone()),
+                ValueType::F32(value) => ValueType::F32(value.clone()),
+                ValueType::F64(value) => ValueType::F64(value.clone()),
+                ValueType::Bool(value) => ValueType::Bool(value.clone()),
+                ValueType::String(value) => ValueType::String(value.clone()),
+                ValueType::Char(value) => ValueType::Char(value.clone()),
+                ValueType::Void(_) => ValueType::Void(()),
+                ValueType::Struct(value) => ValueType::Struct(value.clone()),
+                ValueType::Enum(value) => ValueType::Enum(value.clone()),
+                ValueType::VariableReference(value) => ValueType::VariableReference(value.clone()),
+                ValueType::FunctionCall(value) => ValueType::FunctionCall(value.clone()),
+            },
+        }
+    }
+}
+
 impl StructField {
     pub fn type_is(&self, name: &str) -> bool {
         return self.type_info.name == name;
@@ -153,17 +343,57 @@ pub struct ParameterFacts {
     pub initializer: Option<Box<dyn Expression>>
 }
 
+impl Clone for ParameterFacts {
+    fn clone(&self) -> Self {
+        ParameterFacts {
+            name: self.name.clone(),
+            type_info: self.type_info.clone(),
+            initializer: match &self.initializer {
+                Some(expr) => Some(dyn_clone::clone_box(&**expr)),
+                None => None,
+            }
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
-pub struct FunctionFacts {
+pub struct FunctionExpressionFacts {
     pub name: String,
-    pub args: Option<Vec<ParameterFacts>>,
-    pub body: Vec<AstNode>
+    pub args: Option<Vec<ParameterFacts>>
+}
+
+impl Clone for FunctionExpressionFacts {
+    fn clone(&self) -> Self {
+        let new_args = match &self.args {
+            Some(args) => Some(args.internal_copy()),
+            None => None,
+        };
+
+        FunctionExpressionFacts {
+            name: self.name.clone(),
+            args: new_args,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
 pub struct StructFacts {
     pub name: String,
     pub fields: Option<Vec<StructField>>
+}
+
+impl Clone for StructFacts {
+    fn clone(&self) -> Self {
+        let new_fields = match &self.fields {
+            Some(fields) => Some(fields.internal_copy()),
+            None => None,
+        };
+
+        StructFacts {
+            name: self.name.clone(),
+            fields: new_fields,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -176,6 +406,26 @@ pub struct EnumVariantFacts {
 pub struct EnumFacts {
     pub name: String,
     pub variants: Vec<EnumVariantFacts>
+}
+
+impl Clone for EnumFacts {
+    fn clone(&self) -> Self {
+        let mut new_variants: Vec<EnumVariantFacts> = Vec::new();
+        for variant in &self.variants {
+            new_variants.push(EnumVariantFacts {
+                name: variant.name.clone(),
+                values: match &variant.values {
+                    Some(values) => Some(values.internal_copy()),
+                    None => None,
+                }
+            });
+        }
+
+        EnumFacts {
+            name: self.name.clone(),
+            variants: new_variants,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -339,6 +589,30 @@ impl Display for ValueType {
 
 use dyn_clone::DynClone;
 
+#[derive(Debug, PartialEq)]
+pub struct Block {
+    // All statements in the block to be executed.
+    pub statements: Vec<AstNode>,
+    // The function that owns this block. This is to be used for 
+    // resolving variables.
+    pub owner: Option<Signature>,
+}
+
+impl Clone for Block {
+    fn clone(&self) -> Self {
+        let new_statements = self.statements.internal_copy();
+        let new_owner = match &self.owner {
+            Some(owner) => Some(owner.clone()),
+            None => None,
+        };
+
+        Self {
+            statements: new_statements,
+            owner: new_owner,
+        }
+    }
+}
+
 pub trait Expression: DynClone {
     fn evaluate(&self) -> ValueType;
 
@@ -359,12 +633,47 @@ impl Debug for dyn Expression {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub struct FunctionDeclarationFacts {
+    pub name: String,
+    pub return_type: TypeInfo,
+    pub arguments: Vec<ParameterFacts>,
+    pub body: Block,
+}
+
+impl Clone for FunctionDeclarationFacts {
+    fn clone(&self) -> Self {
+        let new_vec = self.arguments.internal_copy();
+
+        return Self {
+            name: self.name.clone(),
+            return_type: self.return_type.clone(),
+            arguments: new_vec,
+            body: self.body.clone(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct AssignmentFacts {
-    pub is_const: bool,
+    pub constant: bool,
     pub name: String,
     pub type_info: Option<TypeInfo>,
-    pub value: Box<dyn Expression>
+    pub expression: Box<dyn Expression>
+}
+
+impl Clone for AssignmentFacts {
+    fn clone(&self) -> Self {
+        return AssignmentFacts {
+            constant: self.constant,
+            name: self.name.clone(),
+            type_info: match &self.type_info {
+                Some(type_info) => Some(type_info.clone()),
+                None => None,
+            },
+            expression: dyn_clone::clone_box(&*self.expression),
+        }
+    }
 }
 
 impl PartialEq for AssignmentFacts {
@@ -380,10 +689,39 @@ pub enum AstNode {
     Expression(Box<dyn Expression>),
     Struct(StructFacts),
     Enum(EnumFacts),
-    Function(FunctionFacts),
+    FunctionCall(FunctionExpressionFacts),
+    FunctionDeclaration(FunctionDeclarationFacts),
 
     // in the case of `;`, we don't need to store anything.
     EmptyExpr,
+}
+
+impl Clone for AstNode {
+    fn clone(&self) -> Self {
+        match self {
+            AstNode::Assignment(facts) => {
+                return AstNode::Assignment(facts.clone());
+            },
+            AstNode::Expression(expr) => {
+                return AstNode::Expression(dyn_clone::clone_box(&**expr));
+            },
+            AstNode::Struct(facts) => {
+                return AstNode::Struct(facts.clone());
+            },
+            AstNode::Enum(facts) => {
+                return AstNode::Enum(facts.clone());
+            },
+            AstNode::FunctionCall(facts) => {
+                return AstNode::FunctionCall(facts.clone());
+            },
+            AstNode::EmptyExpr => {
+                return AstNode::EmptyExpr;
+            },
+            AstNode::FunctionDeclaration(facts) => {
+                return AstNode::FunctionDeclaration(facts.clone());
+            }
+        }
+    }
 }
 
 impl PartialEq for AstNode {
@@ -421,9 +759,9 @@ impl PartialEq for AstNode {
                     _ => return false,
                 }
             },
-            AstNode::Function(facts) => {
+            AstNode::FunctionCall(facts) => {
                 match other {
-                    AstNode::Function(other_facts) => {
+                    AstNode::FunctionCall(other_facts) => {
                         return facts == other_facts;
                     },
                     _ => return false,
@@ -437,6 +775,14 @@ impl PartialEq for AstNode {
                     _ => return false,
                 }
             },
+            AstNode::FunctionDeclaration(facts) => {
+                match other {
+                    AstNode::FunctionDeclaration(other_facts) => {
+                        return *facts == *other_facts;
+                    },
+                    _ => return false,
+                }
+            }
         }
     }
 }
