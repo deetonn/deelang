@@ -1,7 +1,6 @@
 pub mod ast_node;
 pub mod expressions;
 
-use std::sync::{Arc, Mutex};
 use std::cell::Cell;
 
 use ast_node::*;
@@ -113,11 +112,11 @@ pub fn parse_typename(context: &ParseContext) -> Option<TypeInfo> {
     }
 }
 
-pub fn check_integral_cast(from: usize, info: &TypeInfo) -> Result<Box<dyn Expression>, ParserError> {
+pub fn checked_integral_cast(from: usize, info: &TypeInfo) -> Result<Box<dyn Expression>, ParserError> {
     match info.name.as_str() {
         "bool" => {
             if from > 1 {
-                return Err(ParserError::ExpectedXXX(format!("expected bool, found `{}`", from)));
+                return Err(ParserError::ExpectedXXX(format!("expected bool, found `{}`. NOTE: implicit casts to bool must evaluate to `0` or `1`.", from)));
             }
             return Ok(
                 BoolLiteralExpression::into_expr(from == 1)
@@ -125,15 +124,7 @@ pub fn check_integral_cast(from: usize, info: &TypeInfo) -> Result<Box<dyn Expre
         },
         "char" => {
             if from > u8::MAX as usize {
-                return Err(ParserError::ExpectedXXX(format!("expected char, found `{}`", from)));
-            }
-            return Ok(
-                CharLiteralExpression::into_expr(from as u8 as char)
-            )
-        },
-        "char" => {
-            if from > u8::MAX as usize {
-                return Err(ParserError::ExpectedXXX(format!("expected char, found `{}`", from)));
+                return Err(ParserError::ExpectedXXX(format!("expected char, found `{}`. NOTE: anything between 0-{} is valid here.", u8::MAX, from)));
             }
             return Ok(
                 CharLiteralExpression::into_expr(from as u8 as char)
@@ -141,7 +132,7 @@ pub fn check_integral_cast(from: usize, info: &TypeInfo) -> Result<Box<dyn Expre
         },
         "i32" => {
             if from > i32::MAX as usize {
-                return Err(ParserError::ExpectedXXX(format!("expected i32, found `{}`", from)));
+                return Err(ParserError::ExpectedXXX(format!("expected i32, found `{}`. NOTE: This value is larger than the maximum of u32 ({})", from, i32::MAX)));
             }
             return Ok(
                 I32LiteralExpression::into_expr(from as i32)
@@ -149,7 +140,11 @@ pub fn check_integral_cast(from: usize, info: &TypeInfo) -> Result<Box<dyn Expre
         },
         "u32" => {
             if from > u32::MAX as usize {
-                return Err(ParserError::ExpectedXXX(format!("expected u32, found `{}`", from)));
+                return Err(
+                    ParserError::ExpectedXXX(
+                        format!("expected u32, found `{}`. NOTE: This value is larger than the maximum for this type. (The max: {}) try using u64.", from, u32::MAX)
+                    )
+                );
             }
             return Ok(
                 U32LiteralExpression::into_expr(from as u32)
@@ -177,7 +172,24 @@ pub fn check_integral_cast(from: usize, info: &TypeInfo) -> Result<Box<dyn Expre
     }
 }
 
-pub fn parse_number_expression(context: &ParseContext,
+pub fn parse_string_literal(_: &ParseContext,
+    string: &String,
+    expr_context: &ExpressionContext
+) -> Result<AstNode, ParserError> {
+    if let Some(requested_type) = &expr_context.typ {
+        if requested_type.is_builtin_integral() {
+            return Err(ParserError::ExpectedXXX(format!("cannot implicity convert a string literal into an integral type.")));
+        }
+    }
+
+    return Ok(
+        AstNode::Expression(
+            StringLiteralExpression::into_expr(string.clone())
+        )
+    )
+}
+
+pub fn parse_number_expression(_: &ParseContext,
      number: usize, 
      expr_context: &ExpressionContext
 ) -> Result<AstNode, ParserError> {
@@ -186,7 +198,7 @@ pub fn parse_number_expression(context: &ParseContext,
         if !requested_type.is_builtin_integral() {
             return Err(ParserError::ExpectedXXX(format!("expected integral type, found `{}`", requested_type.name)));
         }
-        return match check_integral_cast(number, requested_type) {
+        return match checked_integral_cast(number, requested_type) {
             Ok(expr) => {
                 Ok(
                     AstNode::Expression(
@@ -226,6 +238,7 @@ pub fn parse_expression(context: &ParseContext, expr_context: &ExpressionContext
 
     match &next_token.token_type {
         TokenType::Number(num) => parse_number_expression(context, num.clone(), expr_context),
+        TokenType::String(contents) => parse_string_literal(context, contents, expr_context),
         _ => todo!("unimplemented expression type")
     }
 }
