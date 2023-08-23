@@ -5,6 +5,11 @@ use crate::{Lexer, parser::parse};
 
 /* this module exists to make running scripts easier. */
 
+pub struct ExtraInfo {
+    pub file_name: String,
+    pub debug: bool,
+}
+
 fn private_run_script(script_file: &str) -> Result<(), String> {
     let source = match std::fs::read_to_string(script_file) {
         Ok(source) => source,
@@ -12,9 +17,13 @@ fn private_run_script(script_file: &str) -> Result<(), String> {
     };
     let mut lexer = Lexer::new(source, None);
     lexer.lex();
+    println!("tokens: {:#?}", lexer.tokens);
 
-    let result = parse(lexer.tokens);
-    println!("result: {:#?}", result);
+    let result = parse(lexer.tokens, ExtraInfo {
+        file_name: script_file.to_owned(),
+        debug: false,
+    });
+    println!("ast: {:#?}", result);
 
     Ok(())
 }

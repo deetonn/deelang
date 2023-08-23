@@ -24,7 +24,7 @@ pub enum TokenType {
     // Keywords.
     Struct, Enum, Fn, Let, Const, If, Else, Return, 
     True, False, While, For, Break, Continue, MySelf,
-    Import,
+    Import, Use,
   
     Eof
 }

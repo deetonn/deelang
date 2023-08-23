@@ -1,1 +1,8 @@
-let a: u64 = "932049258525"
+let a: string = "932049258525"
+
+use String = string
+use std::io::print
+
+fn some_function() -> void {
+    const value: u32 = 21
+}

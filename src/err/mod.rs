@@ -14,22 +14,33 @@ pub fn display_fatal(location: &SourceLocation, message: &str) -> ! {
     /* first, check if the file actually exists on disk */
     // The current path will be cwd\location.file
     let cwd = std::env::current_dir().unwrap();
-    let location = SourceLocation {
-        file: cwd.join(&location.file).to_str().unwrap().to_string(),
+    let mut file = String::new();
+    file += cwd.to_str().unwrap();
+    file += if cfg!(windows) { "\\" } else { "/" };
+    file += location.file.as_str();
+    let real_location = SourceLocation {
+        file,
         line: location.line,
         column: location.column
     };
 
-    if std::path::Path::new(&location.file).exists() {
+    if std::path::Path::new(&real_location.file).exists() {
         /* if it does, read the file and print the line */
-        let file = std::fs::read_to_string(&location.file).unwrap();
+        let file = match std::fs::read_to_string(&real_location.file) {
+            Ok(file) => file,
+            Err(e) => {
+                println!("{}:{}:{}: fatal error: {}", real_location.file, real_location.line, real_location.column, message);
+                println!("(skipped showing source due to error: {} -- {})", e, real_location.file);
+                std::process::exit(1);
+            }
+        };
         let lines: Vec<&str> = file.split("\n").collect();
-        println!("{}:{}:{}: fatal error: {}", location.file, location.line, location.column, message);
-        println!("{} | {}", location.line, lines[location.line as usize - 1]);
-        println!("{} | {}^", location.line, " ".repeat(location.column as usize - 1));
+        println!("{}:{}:{}: fatal error: {}", real_location.file, real_location.line, real_location.column, message);
+        println!("{} | {}", real_location.line, lines[real_location.line as usize]);
+        println!("{} | {}^", real_location.line, "^".repeat(real_location.column as usize));
     } else {
         /* if it doesn't, just print the message */
-        println!("{}:{}:{}: fatal error: {}", location.file, location.line, location.column, message);
+        println!("{}:{}:{}: fatal error: {}", real_location.file, real_location.line, real_location.column, message);
     }
     std::process::exit(1);
 }

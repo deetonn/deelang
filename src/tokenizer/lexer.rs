@@ -2,7 +2,7 @@
 use crate::tokenizer::token_type::TokenType;
 use crate::tokenizer::{Span, Token, SourceLocation};
 
-pub const KEYWORDS: [(&str, TokenType); 16] = [
+pub const KEYWORDS: [(&str, TokenType); 17] = [
     ("struct", TokenType::Struct),
     ("enum", TokenType::Enum),
     ("fn", TokenType::Fn),
@@ -18,7 +18,8 @@ pub const KEYWORDS: [(&str, TokenType); 16] = [
     ("break", TokenType::Break),
     ("continue", TokenType::Continue),
     ("self", TokenType::MySelf),
-    ("import", TokenType::Import)
+    ("import", TokenType::Import),
+    ("use", TokenType::Use)
 ];
 
 pub struct Lexer {
@@ -189,7 +190,7 @@ impl Lexer {
                 },
                 COLON => {
                     if self.peek(1) == Some(COLON) {
-                        self.position += 1;
+                        self.position += 2;
                         self.make_token(TokenType::DoubleColon)
                     }
                     else {
@@ -276,7 +277,6 @@ impl Lexer {
                 _ => panic!("unexpected character: {}", c)
             };
 
-            dbg!(&token);
             self.tokens.push(token);
         }
 

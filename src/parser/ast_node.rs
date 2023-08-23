@@ -134,6 +134,15 @@ impl TypeInfo {
         }
     }
 
+    pub fn size_type() -> TypeInfo {
+        TypeInfo {
+            name: "size_t".to_owned(),
+            size: size_of::<usize>(),
+            needs_to_resolve_size: false,
+            has_been_resolved: true,
+        }
+    }
+
     pub fn is_builtin_integral(&self) -> bool {
         return match &self.name[..] {
             "u32" | "i32" | "u64" | "i64" | "bool" | "char" => true,
@@ -592,7 +601,9 @@ impl Display for ValueType {
             ValueType::Struct(value) => write!(f, "{:?}", value),
             ValueType::Enum(value) => write!(f, "{:?}", value),
             ValueType::VariableReference(value) => write!(f, "&{:?}", value),
-            ValueType::FunctionCall(expr) => write!(f, "{}({} args...)", expr.name, expr.arguments.len()),
+            ValueType::FunctionCall(expr) => {
+                write!(f, "<call to '{}'>", expr.name)
+            },
         }
     }
 }
@@ -692,6 +703,21 @@ impl PartialEq for AssignmentFacts {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeAliasFacts {
+    pub name: String,
+    pub type_info: TypeInfo,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UseStatementFacts {
+    // each string represents a part of the path.
+    // so, "std::io::println" would be represented as:
+    // ["std", "io", "println"]
+    // This way, it can be walked recursively.
+    pub path: Vec<String>,
+}
+
 
 #[derive(Debug)]
 pub enum AstNode {
@@ -701,6 +727,9 @@ pub enum AstNode {
     Enum(EnumFacts),
     FunctionCall(FunctionExpressionFacts),
     FunctionDeclaration(FunctionDeclarationFacts),
+    Body(Block),
+    TypeAlias(TypeAliasFacts),
+    UseStatement(UseStatementFacts),
 
     // in the case of `;`, we don't need to store anything.
     EmptyExpr,
@@ -729,6 +758,15 @@ impl Clone for AstNode {
             },
             AstNode::FunctionDeclaration(facts) => {
                 return AstNode::FunctionDeclaration(facts.clone());
+            },
+            AstNode::Body(block) => {
+                return AstNode::Body(block.clone());
+            },
+            AstNode::TypeAlias(alias) => {
+                return AstNode::TypeAlias(alias.clone());
+            },
+            AstNode::UseStatement(statement) => {
+                return AstNode::UseStatement(statement.clone());
             }
         }
     }
@@ -789,6 +827,30 @@ impl PartialEq for AstNode {
                 match other {
                     AstNode::FunctionDeclaration(other_facts) => {
                         return *facts == *other_facts;
+                    },
+                    _ => return false,
+                }
+            },
+            AstNode::Body(block) => {
+                match other {
+                    AstNode::Body(other_block) => {
+                        return block == other_block;
+                    },
+                    _ => return false,
+                }
+            },
+            AstNode::TypeAlias(alias) => {
+                match other {
+                    AstNode::TypeAlias(other_alias) => {
+                        return alias == other_alias;
+                    },
+                    _ => return false,
+                }
+            },
+            AstNode::UseStatement(statement) => {
+                match other {
+                    AstNode::UseStatement(other_statement) => {
+                        return statement == other_statement;
                     },
                     _ => return false,
                 }
