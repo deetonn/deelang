@@ -235,7 +235,12 @@ impl Lexer {
                     }
                 },
                 SEMI_COLON => self.make_token(TokenType::Semicolon),
-                '"' => self.lex_string(),
+                '"' => {
+                    self.position += 1;
+                    let lexed_string = self.lex_string();
+                    self.position += 1;
+                    lexed_string
+                },
                 // lex identifier
                 'a'..='z' | 'A'..='Z' | '_' => {
                     while self.peek(1).unwrap_or('\0').is_alphanumeric() || self.peek(1).unwrap_or('\0') == '_' {
@@ -303,15 +308,27 @@ impl Lexer {
 
     fn lex_string(&mut self) -> Token {
         let mut current_pos = self.position;
-        while self.peek(current_pos).unwrap_or('\0') != '"' {
+        while let Some(ch) = self.at(current_pos) {
+            if ch == '"' {
+                break;
+            }
             current_pos += 1;
         }
         let string = &self.source[self.start_position..current_pos + 1].trim();
+        self.position = current_pos;
         self.make_token(TokenType::String((*string).to_owned()))
     }
 
+    fn at(&self, position: usize) -> Option<char> {
+        self.source.chars().nth(position)
+    }
+
     fn peek(&self, ahead: usize) -> Option<char> {
-        self.source.chars().nth(self.position + ahead)
+        let result = self.source.chars().nth(self.position + ahead);
+        match result {
+            Some(c) => Some(c),
+            None => panic!("peek() called at EOF."),
+        }
     }
 
     fn current(&self) -> Option<char> {

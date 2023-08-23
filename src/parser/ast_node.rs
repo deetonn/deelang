@@ -124,6 +124,16 @@ impl TypeInfo {
         }
     }
 
+    pub fn string() -> TypeInfo {
+        TypeInfo {
+            name: "string".to_owned(),
+            // string is a pointer type.
+            size: size_of::<usize>(),
+            needs_to_resolve_size: true,
+            has_been_resolved: true,
+        }
+    }
+
     pub fn is_builtin_integral(&self) -> bool {
         return match &self.name[..] {
             "u32" | "i32" | "u64" | "i64" | "bool" | "char" => true,
@@ -629,7 +639,7 @@ impl PartialEq for dyn Expression {
 
 impl Debug for dyn Expression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&format!("Expression: {}", self.evaluate()))
+        f.write_str(&format!("{}", self.evaluate()))
     }
 }
 

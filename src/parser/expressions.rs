@@ -145,6 +145,29 @@ impl I64LiteralExpression {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct StringLiteralExpression {
+    pub value: String,
+}
+
+impl Expression for StringLiteralExpression {
+    fn evaluate(&self) -> ValueType {
+        ValueType::String(self.value.clone())
+    }
+
+    fn try_evaluate_type(&self) -> Option<TypeInfo> {
+        Some(TypeInfo::string())
+    }
+}
+
+impl StringLiteralExpression {
+    pub fn into_expr(value: String) -> Box<dyn Expression> {
+        Box::new(StringLiteralExpression {
+            value
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct VariableReferenceExpression {
     // The name of the variable, this is for the interpreter to resolve.
