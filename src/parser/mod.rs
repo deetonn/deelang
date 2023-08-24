@@ -14,7 +14,7 @@ use expressions::*;
 pub enum ParserError {
     // expected `something`
     ExpectedXXX(String),
-    // Signifies that the parser has finished parsing the file
+    // Signifies that the parser has finished parsing the file.
     Done,
     NotImplemented,
 }
@@ -127,22 +127,83 @@ pub fn matches(token: &Token, typ: TokenType) -> bool {
     token.token_type == typ
 }
 
+/*
+ A typename. This is used for type annotations and type aliases.
+ The "typename" is anything that describes a type. So this includes:
+    - let x: i32 = 0; <--- i32 is the typename
+    - type MyType = i32; <--- MyType & i32 is the typename
+    - fn my_function() -> i32 { 0 } <--- i32 is the typename
+*/
 pub fn parse_typename(context: &ParseContext) -> Option<TypeInfo> {
     let next = context.advance()?;
 
-    match &next.token_type {
+    let identifier = match &next.token_type {
         TokenType::Identifier(ident) => {
             Some(TypeInfo {
                 name: ident.clone(),
                 size: 0,
                 needs_to_resolve_size: true,
                 has_been_resolved: false,
+                generics: None
             })
         },
         _ => None,
+    };
+
+    let next = context.advance()?;
+
+    match &next.token_type {
+        TokenType::Less => {
+            // This is a generic type
+            let mut generics: Vec<GenericArgument> = Vec::new();
+
+            loop {
+                let next = context.advance()?;
+
+                if matches(next, TokenType::Greater) {
+                    break;
+                }
+                else if matches(next, TokenType::Comma) {
+                    continue;
+                }
+                else {
+                    context.walk_back(1);
+                }
+
+                let generic = parse_typename(context)?;
+                generics.push(GenericArgument {
+                    name: generic.name.clone(),
+                    type_info: Some(generic),
+                });
+            }
+
+            return Some(TypeInfo {
+                name: identifier.unwrap().name,
+                size: 0,
+                needs_to_resolve_size: true,
+                has_been_resolved: false,
+                generics: Some(generics)
+            });
+        },
+        _ => {
+            context.walk_back(1);
+            identifier
+        }
     }
 }
 
+/*
+  This function does a checked integral cast. This is when the developer tries
+    to cast a number to a specific type. For example:
+        let x: i32 = 0;
+        let y: u32 = 0;
+        let z: u64 = 0;
+        let a: i64 = 0;
+        let b: bool = 0;
+        let c: char = 0;
+    This function will check if the number can be casted to the type. If it can, it will return the expression.
+    Otherwise, the error is returned to the caller. This error should be cause compilation to fail.
+*/
 pub fn checked_integral_cast(from: usize, info: &TypeInfo) -> ParseResult<Box<dyn Expression>> {
     match info.name.as_str() {
         "bool" => {
@@ -203,6 +264,15 @@ pub fn checked_integral_cast(from: usize, info: &TypeInfo) -> ParseResult<Box<dy
     }
 }
 
+/*
+    This function parses a string literal. This is used for string literals and character literals.
+    If the expression context has a type annotation, then we should try to parse the string literal as that type.
+    This function only fails when the expected type is an integral type. This is because we cannot implicity convert
+    a string literal into an integral type. This is because it is a string literal, which does not point to an address.
+
+    When a string literal is used, it's basically constexpr. This means that it can be evaluated at compile time.
+    In the future, once types are implemented this should be fine if assigned to the type `&String`.
+*/
 pub fn parse_string_literal(_: &ParseContext,
     string: &String,
     expr_context: &ExpressionContext
@@ -220,6 +290,12 @@ pub fn parse_string_literal(_: &ParseContext,
     )
 }
 
+/*
+    This function parses a number literal. This is used for integer literals and boolean literals.
+    If the expression context has a type annotation, then we should try to parse the number literal as that type.
+    If the expression context does not have a type annotation, then we should try to infer the type from the expression itself.
+    If the number is too big to fit in a u32, then we should use an u64. Otherwise, we should use an u32.
+*/
 pub fn parse_number_expression(_: &ParseContext,
      number: usize, 
      expr_context: &ExpressionContext
@@ -273,7 +349,134 @@ pub fn parse_semicolon(context: &ParseContext) {
     context.position.set(context.position.get() - 1);
 }
 
+pub fn parse_function_call_expr(
+    context: &ParseContext,
+    identifier: &String
+) -> ParseResult<AstNode>
+{
+    let left_paren = match context.advance() {
+        Some(tok) => match &tok.token_type {
+            TokenType::LeftParen => tok,
+            _ => return Err(
+                ParserError::ExpectedXXX(
+                    format!("left parenthesis after \"{}\"", identifier),
+                )
+            )
+        },
+        None => return Err(
+            ParserError::ExpectedXXX(
+                format!("one of \"(\", \".\", after \"{}\"", identifier),
+            )
+        )
+    };
+
+    let mut argument_exprs: Vec<Box<dyn Expression>> = Vec::new();
+    let expr_context = ExpressionContext {
+        typ: &None
+    };
+
+    loop {
+        let next = parse_expression(context, &expr_context);
+
+        match next {
+            Ok(node) => match node {
+                AstNode::Expression(expr) => {
+                    argument_exprs.push(expr)
+                },
+                _ => return Err(
+                    ParserError::ExpectedXXX(format!("expression, but got \"{}\"", node.display()))
+                )
+            },
+            Err(_) => {
+                /*
+                    Walk back here due to parse_expression consuming
+                    one token to try parse an expression.
+
+                    This case means there is not another expression, so try
+                    to consume a right paren.
+                */
+                context.walk_back(1);
+                let paren = match context.advance() {
+                    Some(Token { token_type: TokenType::RightParen, ..}) => {
+                        // should be the end of the function call expression.
+                        return Ok(
+                            AstNode::FunctionCall(FunctionCallExpressionFacts {
+                                name: identifier.clone(),
+                                args: Some(argument_exprs)
+                            })
+                        )
+                    },
+                    _ => return Err(
+                        ParserError::ExpectedXXX(
+                            format!("expected right paren here due to no expression being present.")
+                        )
+                    )
+                };
+            }
+        }
+
+        match context.advance() {
+            Some(Token{token_type: TokenType::Comma, .. }) => continue,
+            Some(Token{token_type: TokenType::RightParen, ..}) => {
+                return Ok(
+                    AstNode::FunctionCall(
+                        FunctionCallExpressionFacts {
+                            name: identifier.clone(),
+                            args: Some(argument_exprs)
+                        }
+                    )
+                )
+            },
+            Some(unknown_token) => {
+                return Err(
+                    ParserError::ExpectedXXX(
+                        format!("\"{}\" was unexpected here.", unknown_token.token_type.format_for_err())
+                    )
+                )
+            }
+            None => {
+                return Err(
+                    ParserError::ExpectedXXX(
+                        format!("expected either \",\", \")\" or [expression] here.")
+                    )
+                )
+            }
+        };
+    }
+}
+
+/*
+  This function is responsible for parsing any expression that begins with an identifier.
+  So function calls, variable declarations, variable assignments, etc.
+*/
+pub fn parse_expr_identifier(context: &ParseContext) -> ParseResult<AstNode> {
+    let ident = match context.advance() {
+        Some(token) => match &token.token_type {
+            TokenType::Identifier(ident) => ident,
+            _ => return Err(
+                ParserError::ExpectedXXX(
+                    format!("identifier, but got {}", token.token_type.format_for_err())
+                )
+            )
+        },
+        None => return Err(
+            ParserError::ExpectedXXX("identifier".to_owned())
+        )
+    };
+
+    let next_tok = context.advance();
+
+    if let Some(Token { token_type: TokenType::LeftParen, ..}) = next_tok {
+        // go back to before the left paren so parse_function_call_expr can consume it.
+        context.walk_back(1);
+        return parse_function_call_expr(context, ident);
+    }
+
+    todo!("implement chaining operator");
+}
+
 // This function is expected to parse an expression and consume the semi-colon.
+// This is a very general function, that can be used to parse any expression.
 pub fn parse_expression(context: &ParseContext, expr_context: &ExpressionContext) -> ParseResult<AstNode> {
     let next_token = match context.advance() {
         Some(token) => token,
@@ -291,10 +494,21 @@ pub fn parse_expression(context: &ParseContext, expr_context: &ExpressionContext
             let _ = parse_semicolon(context);
             string_literal_expr
         },
-        _ => todo!("unimplemented expression type")
+        TokenType::Identifier(_) => {
+            context.walk_back(1);
+            let identifier_expr = parse_expr_identifier(context)?;
+            let _ = parse_semicolon(context);
+            Ok(identifier_expr)
+        }
+        _ => Err(ParserError::NotImplemented),
     }
 }
 
+/*
+  This function will parse an assignment. This is used for both `let` and `const` statements.
+  This function will parse the identifier, type annotation, and expression.
+  No checking is done here. This is because the type checker will do that.
+*/
 pub fn parse_assignment(context: &ParseContext, constant: bool) -> ParseResult<AstNode> {
     let identifier = match context.advance() {
         Some(Token { token_type: TokenType::Identifier(ident), .. }) => ident,
@@ -333,9 +547,22 @@ pub fn parse_assignment(context: &ParseContext, constant: bool) -> ParseResult<A
                     annotation = Some(typ.clone());
                 }
             }
-            Some(expr)
+            expr
         },
-        _ => None
+        AstNode::FunctionCall(facts) => {
+            Box::new(FunctionCallExpression {
+                name: facts.name,
+                arguments: match facts.args {
+                    Some(args) => args,
+                    None => Vec::new()
+                }
+            })
+        }
+        _ => return Err(
+            ParserError::ExpectedXXX(
+                format!("expression, but got {}", expression.display())
+            )
+        )
     };
 
     // parse_expression is expected to consume the semi-colon.
@@ -347,15 +574,18 @@ pub fn parse_assignment(context: &ParseContext, constant: bool) -> ParseResult<A
                 name: identifier.clone(),
                 type_info: annotation,
                 constant,
-                expression: match expression_storage {
-                    Some(expr) => expr,
-                    None => panic!("invalid expression")
-                },
+                expression: expression_storage,
             }
         )
     )
 }
 
+/*
+    This function parses a function declaration parameter. When a function is defined, in any context,
+    this function can be used to parse its declared paramters. This function will parse the identifier,
+    type annotation, and initializer. No checking is done here. This is because the type checker will do that.
+    NOTE: This function does not consume commas. This is because the caller is expected to consume commas.
+*/
 pub fn parse_function_declaration_parameter(context: &ParseContext) -> ParseResult<ParameterFacts> {
     let identifier = match context.advance() {
         Some(Token { token_type: TokenType::Identifier(ident), .. }) => ident,
@@ -385,6 +615,10 @@ pub fn parse_function_declaration_parameter(context: &ParseContext) -> ParseResu
     )
 }
 
+/*
+  This function will parse a function body. This should be used to parse any block at all, whether that is a
+  closure, function declaration, or anything else. It is general, and can be used for anything. 
+*/
 pub fn parse_body(context: &ParseContext, owner: Option<Signature>) -> ParseResult<AstNode> {
     let _ = match context.advance() {
         Some(Token { token_type: TokenType::LeftBrace, .. }) => true,
@@ -426,6 +660,11 @@ pub fn parse_body(context: &ParseContext, owner: Option<Signature>) -> ParseResu
     )
 }
 
+/*
+    This function parses a function declaration.
+    This function will parse the identifier, arguments, return type annotation, and body.
+    No checking is done here. This is because the type checker will do that.
+*/
 pub fn parse_function_declaration(context: &ParseContext) -> ParseResult<AstNode> {
     // `fn` keyword.
     let _ = match context.advance() {
@@ -467,15 +706,18 @@ pub fn parse_function_declaration(context: &ParseContext) -> ParseResult<AstNode
         }
     }
 
-    let _ = match context.advance() {
+    let has_type_annotation = match context.advance() {
         Some(Token { token_type: TokenType::Arrow, .. }) => true,
-        _ => return Err(ParserError::ExpectedXXX("arrow(->), functions require a return type annotation.".to_owned())),
+        _ => {
+            context.walk_back(1);
+            false
+        }
     };
 
-    let return_type = match parse_typename(context) {
+    let return_type = if has_type_annotation { match parse_typename(context) {
         Some(typ) => typ,
         None => return Err(ParserError::ExpectedXXX("type after `->`. NOTE: type annotations are required for function return types".to_owned())),
-    };
+    }} else { TypeInfo::void() };
 
     let body = parse_body(context, Some(
         Signature {
@@ -492,7 +734,7 @@ pub fn parse_function_declaration(context: &ParseContext) -> ParseResult<AstNode
                 arguments,
                 return_type: return_type.clone(),
                 body: match body {
-                    AstNode::Body(body) => body,
+                    AstNode::Body(body) => Some(body),
                     _ => panic!("invalid body")
                 },
             }
@@ -500,6 +742,15 @@ pub fn parse_function_declaration(context: &ParseContext) -> ParseResult<AstNode
     )
 }
 
+/*
+  This function will attempt to parse a `use` statement. This is used to either typedef, or import
+  a module/(member of module). 
+
+  IF - The syntax is like: use U32 = u32;
+    THEN - This is a type alias. This will create a new type called `U32` that is an alias for `u32`.
+  IF - The syntax is like: use std::io::print;
+    THEN - This is a module import. This will import the print member of the `std::io` module into the current scope.
+*/
 pub fn parse_use_statement(context: &ParseContext) -> ParseResult<AstNode> {
     let _ = match context.advance() {
         Some(Token { token_type: TokenType::Use, .. }) => true,
@@ -573,6 +824,153 @@ pub fn parse_use_statement(context: &ParseContext) -> ParseResult<AstNode> {
     }
 }
 
+/*
+  This function just parses a function signature. This is used for traits, where the function
+  is not defined. This is used as a template for the function. This function will parse the identifier,
+  arguments, and return type annotation. No checking is done here. This is because the type checker will do that.
+
+  owner here is the name of the trait this function will live in.
+*/
+pub fn parse_trait_function(context: &ParseContext, owner: Option<TypeInfo>) -> ParseResult<FunctionDeclarationFacts> {
+    let _ = match context.advance() {
+        Some(Token { token_type: TokenType::Fn, .. }) => true,
+        _ => return Err(ParserError::ExpectedXXX("fn".to_owned())),
+    };
+
+    let identifier = match context.advance() {
+        Some(Token { token_type: TokenType::Identifier(ident), .. }) => ident,
+        _ => return Err(ParserError::ExpectedXXX("identifier".to_owned())),
+    };
+
+    let mut arguments: Vec<ParameterFacts> = Vec::new();
+
+    let mut had_first_paren = false;
+
+    loop {
+        let current = context.advance();
+
+        if let Some(Token { token_type: TokenType::LeftParen, .. }) = current {
+            had_first_paren = true;
+            continue;
+        }
+        else if let Some(Token { token_type: TokenType::Comma, .. }) = current {
+            continue;
+        }
+        else if let Some(Token { token_type: TokenType::RightParen, .. }) = current {
+            if !had_first_paren {
+                return Err(ParserError::ExpectedXXX("left parenthesis".to_owned()));
+            }
+            break;
+        }
+        else if let Some(Token { token_type: TokenType::Identifier(_), .. }) = current {
+            context.position.set(context.position.get() - 1);
+            let param = parse_function_declaration_parameter(context)?;
+            arguments.push(param);
+        }
+        else if let Some(Token {token_type: TokenType::MySelf, ..}) = current {
+            let self_param = ParameterFacts {
+                name: "self".to_owned(),
+                type_info: match &owner {
+                    Some(owner) => owner.clone(),
+                    None => return Err(ParserError::ExpectedXXX("This trait declaration cannot contain a `self` parameter. It's trait binding is unknown.".to_owned())),
+                },
+                initializer: None,
+            };
+            arguments.push(self_param);
+            context.walk_back(1);
+
+            if let Some(Token { token_type: TokenType::Colon, ..}) = context.advance() {
+                return Err(
+                    ParserError::ExpectedXXX(
+                        format!("The \"self\" parameter cannot have a type annotation. This is because the type is already known. (The type of self is inferred to {})", owner.unwrap().name)
+                    )
+                );
+            }
+            continue;
+        }
+        else {
+            return Err(ParserError::ExpectedXXX(format!("identifier, comma, or right parenthesis but got {}", current.unwrap().token_type.format_for_err())));
+        }
+    }
+
+    let _ = match context.advance() {
+        Some(Token { token_type: TokenType::Arrow, .. }) => true,
+        _ => return Err(ParserError::ExpectedXXX("arrow(->), functions require a return type annotation.".to_owned())),
+    };
+
+    let return_type = match parse_typename(context) {
+        Some(typ) => typ,
+        None => return Err(ParserError::ExpectedXXX("type after `->`. NOTE: type annotations are required for function return types".to_owned())),
+    };
+
+    Ok(
+        FunctionDeclarationFacts {
+            name: identifier.clone(),
+            arguments,
+            return_type: return_type.clone(),
+            body: None,
+        }
+    )
+}
+
+/*
+  This function will attempt to parse a full trait declaration. This is used to define a trait.
+  This function will parse the identifier, functions, and body. No checking is done here. This is because the type checker will do that.
+*/
+pub fn parse_trait_declaration(context: &ParseContext) -> ParseResult<AstNode> {
+    let _ = match context.advance() {
+        Some(Token { token_type: TokenType::Trait, .. }) => true,
+        _ => return Err(ParserError::ExpectedXXX("trait".to_owned())),
+    };
+
+    let identifier = match parse_typename(context) {
+        Some(typename) => typename,
+        None => return Err(ParserError::ExpectedXXX("identifier".to_owned())),
+    };
+
+    let _ = match context.advance() {
+        Some(Token { token_type: TokenType::LeftBrace, .. }) => true,
+        _ => return Err(ParserError::ExpectedXXX("left brace".to_owned())),
+    };
+
+    let mut declarations: Vec<FunctionDeclarationFacts> = Vec::new();
+
+    loop {
+        let current = context.advance();
+
+        if let Some(Token { token_type: TokenType::RightBrace, .. }) = current {
+            break;
+        }
+        else if let Some(Token { token_type: TokenType::Fn, .. }) = current {
+            context.position.set(context.position.get() - 1);
+            let decl = parse_trait_function(
+                context,
+                Some(
+                    TypeInfo {
+                        name: identifier.name.clone(),
+                        size: 0,
+                        needs_to_resolve_size: true,
+                        has_been_resolved: false,
+                        generics: None,
+                    }
+                ))?;
+            declarations.push(decl);
+        }
+        else {
+            return Err(ParserError::ExpectedXXX("identifier or right brace".to_owned()));
+        }
+    }
+
+    Ok(
+        AstNode::TraitDeclaration(
+            TraitFacts {
+                name: identifier.name.clone(),
+                functions: declarations,
+            }
+        )
+    )
+}
+
 pub fn parse_statement(context: &ParseContext) -> Result<AstNode, ParserError> {
     let next = match context.advance() {
         Some(next) => next,
@@ -602,8 +1000,17 @@ pub fn parse_statement(context: &ParseContext) -> Result<AstNode, ParserError> {
         return parse_use_statement(context);
     }
 
+    if matches(next, TokenType::Trait) {
+        context.walk_back(1);
+        return parse_trait_declaration(context);
+    }
+
     if matches(next, TokenType::If) {
         todo!("Implement all of the conditional operators before implementing if statements.");
+    }
+
+    if matches(next, TokenType::While) {
+        todo!("Implement all of the conditional operators before implementing while loops.");
     }
 
     Err(ParserError::ExpectedXXX(format!("statement, but got token {:?}", next.token_type)))

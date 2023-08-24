@@ -2,7 +2,7 @@
 use crate::tokenizer::token_type::TokenType;
 use crate::tokenizer::{Span, Token, SourceLocation};
 
-pub const KEYWORDS: [(&str, TokenType); 17] = [
+pub const KEYWORDS: [(&str, TokenType); 18] = [
     ("struct", TokenType::Struct),
     ("enum", TokenType::Enum),
     ("fn", TokenType::Fn),
@@ -19,7 +19,8 @@ pub const KEYWORDS: [(&str, TokenType); 17] = [
     ("continue", TokenType::Continue),
     ("self", TokenType::MySelf),
     ("import", TokenType::Import),
-    ("use", TokenType::Use)
+    ("use", TokenType::Use),
+    ("trait", TokenType::Trait),
 ];
 
 pub struct Lexer {
@@ -53,9 +54,9 @@ const XOR: char = '^';
 const NOT: char = '~';
 
 const DOT: char = '.';
+const COMMA: char = ',';
 const COLON: char = ':';
 const SEMI_COLON: char = ';';
-
 
 impl Lexer {
     pub fn new(source: String, file: Option<String>) -> Lexer {
@@ -244,11 +245,27 @@ impl Lexer {
                 },
                 // lex identifier
                 'a'..='z' | 'A'..='Z' | '_' => {
+                    // TODO: at some point, in the current "test.dl", the function "take" within the trait
+                    //       contains a "(". This should not happen. Fix this.
                     while self.peek(1).unwrap_or('\0').is_alphanumeric() || self.peek(1).unwrap_or('\0') == '_' {
                         self.position += 1;
                     }
-                    let identifier = &self.source[self.start_position..self.position + 1].trim();
-                    let token_type = KEYWORDS.iter().find(|(k, _)| *k == *identifier).map(|(_, v)| v.clone()).unwrap_or(TokenType::Identifier((*identifier).to_owned()));
+                    let identifier = &self.source[self.start_position..self.position + 1]
+                        .trim()
+                        .chars()
+                        .into_iter()
+                        .filter(|c| {
+                            match c {
+                                'a'..='z' | 'A'..='Z' | '_' | '0'..='9' => true,
+                                _ => false
+                            }
+                        })
+                        .collect::<String>();
+                    let token_type = KEYWORDS
+                        .iter()
+                        .find(|(k, _)| *k == *identifier)
+                        .map(|(_, v)| v.clone())
+                        .unwrap_or(TokenType::Identifier((*identifier).to_owned()));
                     self.make_token(token_type)
                 },
                 ' ' | '\r' | '\t' => {
@@ -267,13 +284,24 @@ impl Lexer {
                     while self.peek(1).unwrap_or('\0').is_numeric() {
                         self.position += 1;
                     }
-                    let number = &self.source[self.start_position..self.position + 1].trim();
-                    let number = match number.parse::<usize>() {
+                    let number_str = &self.source[self.start_position..self.position + 1]
+                        .trim()
+                        .chars()
+                        .into_iter()
+                        .filter(|ch| {
+                            match ch {
+                                '0'..='9' => true,
+                                _ => false,
+                            }
+                        })
+                        .collect::<String>();
+                    let number = match number_str.parse::<usize>() {
                         Ok(n) => n,
-                        Err(e) => panic!("failed to parse number: {}", e)
+                        Err(e) => panic!("failed to parse number: {} (value: {})", e, number_str)
                     };
                     self.make_token(TokenType::Number(number))
                 },
+                COMMA => self.make_token(TokenType::Comma),
                 _ => panic!("unexpected character: {}", c)
             };
 
@@ -315,7 +343,7 @@ impl Lexer {
             current_pos += 1;
         }
         let string = &self.source[self.start_position..current_pos + 1].trim();
-        self.position = current_pos;
+        self.position = current_pos - 1 ;
         self.make_token(TokenType::String((*string).to_owned()))
     }
 

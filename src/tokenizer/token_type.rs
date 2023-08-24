@@ -24,7 +24,19 @@ pub enum TokenType {
     // Keywords.
     Struct, Enum, Fn, Let, Const, If, Else, Return, 
     True, False, While, For, Break, Continue, MySelf,
-    Import, Use,
+    Import, Use, Trait,
   
     Eof
+}
+
+impl TokenType {
+    pub fn format_for_err(&self) -> String {
+        match self {
+            TokenType::Identifier(ident) => format!("identifier `{}`", ident),
+            TokenType::Number(ident) => format!("number `{}`", ident),
+            TokenType::Float(ident) => format!("float `{}`", ident),
+            TokenType::String(ident) => format!("string `{}`", ident),
+            _ => format!("{:?}", self),
+        }
+    }
 }

@@ -42,5 +42,9 @@ pub fn display_fatal(location: &SourceLocation, message: &str) -> ! {
         /* if it doesn't, just print the message */
         println!("{}:{}:{}: fatal error: {}", real_location.file, real_location.line, real_location.column, message);
     }
+    if cfg!(debug_assertions) {
+        // This exists for the stacktrace
+        panic!("debug panic");
+    }
     std::process::exit(1);
 }

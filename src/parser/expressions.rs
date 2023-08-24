@@ -133,6 +133,7 @@ impl Expression for I64LiteralExpression {
             size: 8,
             needs_to_resolve_size: false,
             has_been_resolved: true,
+            generics: None,
         })
     }
 }

@@ -3,6 +3,18 @@ let a: string = "932049258525"
 use String = string
 use std::io::print
 
-fn some_function() -> void {
+trait SomeTrait {
+    fn take(self) -> String
+}
+
+fn some_function(
+    num: u32, 
+    s: string)
+ -> Vec<u32> {
     const value: u32 = 21
 }
+
+const result = some_function(
+    2, 
+    "Hello, World"
+)

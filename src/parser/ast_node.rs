@@ -15,6 +15,14 @@ impl<T: Clone> VecExt<T> for Vec<T> {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+pub struct GenericArgument {
+    pub name: String,
+    // This is optional, because we don't know the type of the generic argument
+    // in the declaration.
+    pub type_info: Option<TypeInfo>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub struct TypeInfo {
     pub name: String,
     pub size: usize,
@@ -23,6 +31,8 @@ pub struct TypeInfo {
     /* This field describes if the type has any information about it yet. */
     /* This does not tell you that the type exists, only whether we have info about it yet. */
     pub has_been_resolved: bool,
+
+    pub generics: Option<Vec<GenericArgument>>,
 }
 
 impl TypeInfo {
@@ -49,6 +59,7 @@ impl TypeInfo {
             size: 0,
             needs_to_resolve_size: false,
             has_been_resolved: true,
+            generics: None
         }
     }
 
@@ -58,6 +69,7 @@ impl TypeInfo {
             size: 4,
             needs_to_resolve_size: false,
             has_been_resolved: true,
+            generics: None
         }
     } 
 
@@ -67,6 +79,7 @@ impl TypeInfo {
             size: 4,
             needs_to_resolve_size: false,
             has_been_resolved: true,
+            generics: None
         }
     }
 
@@ -76,6 +89,7 @@ impl TypeInfo {
             size: 8,
             needs_to_resolve_size: false,
             has_been_resolved: true,
+            generics: None
         }
     }
 
@@ -85,6 +99,7 @@ impl TypeInfo {
             size: 8,
             needs_to_resolve_size: false,
             has_been_resolved: true,
+            generics: None
         }
     }
 
@@ -94,6 +109,7 @@ impl TypeInfo {
             size: 4,
             needs_to_resolve_size: false,
             has_been_resolved: true,
+            generics: None
         }
     }
 
@@ -103,6 +119,7 @@ impl TypeInfo {
             size: 8,
             needs_to_resolve_size: false,
             has_been_resolved: true,
+            generics: None
         }
     }
 
@@ -112,6 +129,7 @@ impl TypeInfo {
             size: 1,
             needs_to_resolve_size: false,
             has_been_resolved: true,
+            generics: None
         }
     }
 
@@ -121,6 +139,7 @@ impl TypeInfo {
             size: 1,
             needs_to_resolve_size: false,
             has_been_resolved: true,
+            generics: None
         }
     }
 
@@ -131,6 +150,7 @@ impl TypeInfo {
             size: size_of::<usize>(),
             needs_to_resolve_size: true,
             has_been_resolved: true,
+            generics: None
         }
     }
 
@@ -140,6 +160,7 @@ impl TypeInfo {
             size: size_of::<usize>(),
             needs_to_resolve_size: false,
             has_been_resolved: true,
+            generics: None
         }
     }
 
@@ -206,6 +227,7 @@ impl TypeInfo {
             size: 0,
             needs_to_resolve_size: true,
             has_been_resolved: false,
+            generics: None
         }
     }
 }
@@ -213,82 +235,17 @@ impl TypeInfo {
 static BUILTIN_TYPES: Lazy<Mutex<HashMap<&'static str, TypeInfo>>> = Lazy::new(|| {
     let mut map = HashMap::new();
 
-    map.insert("u32", TypeInfo {
-        name: "u32".to_owned(),
-        size: 4,
-        needs_to_resolve_size: false,
-        has_been_resolved: true,
-    });
-
-    map.insert("i32", TypeInfo {
-        name: "i32".to_owned(),
-        size: 4,
-        needs_to_resolve_size: false,
-        has_been_resolved: true,
-    });
-
-    map.insert("u64", TypeInfo {
-        name: "u64".to_owned(),
-        size: 8,
-        needs_to_resolve_size: false,
-        has_been_resolved: true,
-    });
-
-    map.insert("i64", TypeInfo {
-        name: "i64".to_owned(),
-        size: 8,
-        needs_to_resolve_size: false,
-        has_been_resolved: true,
-    });
-
-    map.insert("f32", TypeInfo {
-        name: "f32".to_owned(),
-        size: 4,
-        needs_to_resolve_size: false,
-        has_been_resolved: true,
-    });
-
-    map.insert("f64", TypeInfo {
-        name: "f64".to_owned(),
-        size: 8,
-        needs_to_resolve_size: false,
-        has_been_resolved: true,
-    });
-
-    map.insert("bool", TypeInfo {
-        name: "bool".to_owned(),
-        size: 1,
-        needs_to_resolve_size: false,
-        has_been_resolved: true,
-    });
-
-    map.insert("char", TypeInfo {
-        name: "char".to_owned(),
-        size: 1,
-        needs_to_resolve_size: false,
-        has_been_resolved: true,
-    });
-
-    map.insert("string", TypeInfo {
-        name: "string".to_owned(),
-        size: size_of::<usize>(),
-        needs_to_resolve_size: true,
-        has_been_resolved: true,
-    });
-
-    map.insert("void", TypeInfo {
-        name: "void".to_owned(),
-        size: 0,
-        needs_to_resolve_size: false,
-        has_been_resolved: true,
-    });
-
-    map.insert("size_t", TypeInfo {
-        name: "size_t".to_owned(),
-        size: size_of::<usize>(),
-        needs_to_resolve_size: false,
-        has_been_resolved: true,
-    });
+    map.insert("u32", TypeInfo::unsigned_32bit());
+    map.insert("i32", TypeInfo::signed_32bit());
+    map.insert("u64", TypeInfo::unsigned_64bit());
+    map.insert("i64", TypeInfo::signed_64bit());
+    map.insert("f32", TypeInfo::float_32bit());
+    map.insert("f64", TypeInfo::float_64bit());
+    map.insert("bool", TypeInfo::boolean());
+    map.insert("char", TypeInfo::character());
+    map.insert("string", TypeInfo::string());
+    map.insert("void", TypeInfo::void());
+    map.insert("size_t", TypeInfo::size_type());
 
     Mutex::new(map)
 });
@@ -376,21 +333,32 @@ impl Clone for ParameterFacts {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct FunctionExpressionFacts {
+pub struct FunctionCallExpressionFacts {
     pub name: String,
-    pub args: Option<Vec<ParameterFacts>>
+    // an actual function call accepts expression arguments
+    pub args: Option<Vec<Box<dyn Expression>>>
 }
 
-impl Clone for FunctionExpressionFacts {
+impl Clone for FunctionCallExpressionFacts {
     fn clone(&self) -> Self {
         let new_args = match &self.args {
-            Some(args) => Some(args.internal_copy()),
+            Some(args) => {
+                let mut new_vec: Vec<Box<dyn Expression>> = Vec::new();
+                for elem in args {
+                    let copy = dyn_clone::clone_box(elem.as_ref());
+                    new_vec.push(copy);
+                }
+                Some(new_vec)
+            },
             None => None,
         };
 
-        FunctionExpressionFacts {
+        FunctionCallExpressionFacts {
             name: self.name.clone(),
-            args: new_args,
+            args: match new_args {
+                Some(v) => Some(v),
+                None => None
+            }
         }
     }
 }
@@ -659,7 +627,7 @@ pub struct FunctionDeclarationFacts {
     pub name: String,
     pub return_type: TypeInfo,
     pub arguments: Vec<ParameterFacts>,
-    pub body: Block,
+    pub body: Option<Block>,
 }
 
 impl Clone for FunctionDeclarationFacts {
@@ -718,6 +686,11 @@ pub struct UseStatementFacts {
     pub path: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraitFacts {
+    pub name: String,
+    pub functions: Vec<FunctionDeclarationFacts>,
+}
 
 #[derive(Debug)]
 pub enum AstNode {
@@ -725,14 +698,58 @@ pub enum AstNode {
     Expression(Box<dyn Expression>),
     Struct(StructFacts),
     Enum(EnumFacts),
-    FunctionCall(FunctionExpressionFacts),
+    FunctionCall(FunctionCallExpressionFacts),
     FunctionDeclaration(FunctionDeclarationFacts),
     Body(Block),
     TypeAlias(TypeAliasFacts),
     UseStatement(UseStatementFacts),
+    TraitDeclaration(TraitFacts),
 
     // in the case of `;`, we don't need to store anything.
     EmptyExpr,
+}
+
+impl AstNode {
+    pub fn display(&self) -> String {
+        match self {
+            AstNode::Assignment(facts) => {
+                format!("assignment")
+            },
+            AstNode::Body(facts) => {
+                format!("body")
+            },
+            AstNode::EmptyExpr => "Empty Expression".to_owned(),
+            AstNode::Enum(facts) => {
+                format!("declaration of enum \"{}\"", facts.name)
+            },
+            AstNode::Expression(expr) => {
+                format!("expression [type={}]", match expr.try_evaluate_type() {
+                    Some(t) => t.name,
+                    None => "unknown".to_owned()
+                })
+            },
+            AstNode::FunctionCall(facts) => {
+                "function call".to_owned()
+            },
+            AstNode::FunctionDeclaration(facts) => {
+                format!("declaration of function \"{}\"", facts.name)
+            },
+            AstNode::Struct(facts) => {
+                format!("declaration of struct \"{}\"", facts.name)
+            },
+            AstNode::TraitDeclaration(facts) => {
+                format!("declaration of trait \"{}\"", facts.name)
+            },
+            AstNode::TypeAlias(alias) => {
+                format!("type alias [{} = {}]", 
+                    alias.name,
+                    alias.type_info.name)
+            },
+            AstNode::UseStatement(facts) => {
+                format!("use statement")
+            }
+        }
+    }
 }
 
 impl Clone for AstNode {
@@ -767,6 +784,9 @@ impl Clone for AstNode {
             },
             AstNode::UseStatement(statement) => {
                 return AstNode::UseStatement(statement.clone());
+            },
+            AstNode::TraitDeclaration(trait_facts) => {
+                return AstNode::TraitDeclaration(trait_facts.clone());
             }
         }
     }
@@ -851,6 +871,14 @@ impl PartialEq for AstNode {
                 match other {
                     AstNode::UseStatement(other_statement) => {
                         return statement == other_statement;
+                    },
+                    _ => return false,
+                }
+            },
+            AstNode::TraitDeclaration(trait_facts) => {
+                match other {
+                    AstNode::TraitDeclaration(other_trait_facts) => {
+                        return trait_facts == other_trait_facts;
                     },
                     _ => return false,
                 }
