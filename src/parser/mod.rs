@@ -14,6 +14,8 @@ use expressions::*;
 pub enum ParserError {
     // expected `something`
     ExpectedXXX(String),
+    // This signifies that there was nothing to parse.
+    Nothing,
     // Signifies that the parser has finished parsing the file.
     Done,
     NotImplemented,
@@ -27,6 +29,7 @@ impl ParserError {
             ParserError::ExpectedXXX(message) => format!("expected {}", message),
             ParserError::Done => "done".to_owned(),
             ParserError::NotImplemented => "not implemented".to_owned(),
+            ParserError::Nothing => "nothing to parse".to_owned(),
         }
     }
 }
@@ -86,6 +89,7 @@ pub struct ParseContext {
 
 pub struct ExpressionContext<'a> {
     pub typ: &'a Option<TypeInfo>,
+    pub location: &'a SourceLocation,
 }
 
 impl ParseContext {
@@ -204,14 +208,17 @@ pub fn parse_typename(context: &ParseContext) -> Option<TypeInfo> {
     This function will check if the number can be casted to the type. If it can, it will return the expression.
     Otherwise, the error is returned to the caller. This error should be cause compilation to fail.
 */
-pub fn checked_integral_cast(from: usize, info: &TypeInfo) -> ParseResult<Box<dyn Expression>> {
+pub fn checked_integral_cast(from: usize, 
+    info: &TypeInfo,
+    location: &SourceLocation,
+) -> ParseResult<Box<dyn Expression>> {
     match info.name.as_str() {
         "bool" => {
             if from > 1 {
                 return Err(ParserError::ExpectedXXX(format!("bool, found `{}`. NOTE: implicit casts to bool must evaluate to `0` or `1`.", from)));
             }
             return Ok(
-                BoolLiteralExpression::into_expr(from == 1)
+                BoolLiteralExpression::into_expr(from == 1, location.clone())
             )
         },
         "char" => {
@@ -219,7 +226,7 @@ pub fn checked_integral_cast(from: usize, info: &TypeInfo) -> ParseResult<Box<dy
                 return Err(ParserError::ExpectedXXX(format!("char, found `{}`. NOTE: anything between 0-{} is valid here.", u8::MAX, from)));
             }
             return Ok(
-                CharLiteralExpression::into_expr(from as u8 as char)
+                CharLiteralExpression::into_expr(from as u8 as char, location.clone())
             )
         },
         "i32" => {
@@ -227,7 +234,7 @@ pub fn checked_integral_cast(from: usize, info: &TypeInfo) -> ParseResult<Box<dy
                 return Err(ParserError::ExpectedXXX(format!("i32, found `{}`. NOTE: This value is larger than the maximum of u32 ({})", from, i32::MAX)));
             }
             return Ok(
-                I32LiteralExpression::into_expr(from as i32)
+                I32LiteralExpression::into_expr(from as i32, location.clone())
             )
         },
         "u32" => {
@@ -239,7 +246,7 @@ pub fn checked_integral_cast(from: usize, info: &TypeInfo) -> ParseResult<Box<dy
                 );
             }
             return Ok(
-                U32LiteralExpression::into_expr(from as u32)
+                U32LiteralExpression::into_expr(from as u32, location.clone())
             )
         },
         "i64" => {
@@ -247,7 +254,7 @@ pub fn checked_integral_cast(from: usize, info: &TypeInfo) -> ParseResult<Box<dy
                 return Err(ParserError::ExpectedXXX(format!("i64, found `{}`", from)));
             }
             return Ok(
-                I64LiteralExpression::into_expr(from as i64)
+                I64LiteralExpression::into_expr(from as i64, location.clone())
             )
         },
         "u64" => {
@@ -255,7 +262,7 @@ pub fn checked_integral_cast(from: usize, info: &TypeInfo) -> ParseResult<Box<dy
                 return Err(ParserError::ExpectedXXX(format!("u64, found `{}`", from)));
             }
             return Ok(
-                U64LiteralExpression::into_expr(from as u64)
+                U64LiteralExpression::into_expr(from as u64, location.clone())
             )
         },
         _ => {
@@ -285,7 +292,8 @@ pub fn parse_string_literal(_: &ParseContext,
 
     return Ok(
         AstNode::Expression(
-            StringLiteralExpression::into_expr(string.clone())
+            StringLiteralExpression::into_expr(string.clone(),
+             expr_context.location.clone())
         )
     )
 }
@@ -305,7 +313,10 @@ pub fn parse_number_expression(_: &ParseContext,
         if !requested_type.is_builtin_integral() {
             return Err(ParserError::ExpectedXXX(format!("integral type, found `{}`", requested_type.name)));
         }
-        return match checked_integral_cast(number, requested_type) {
+        return match checked_integral_cast(number, 
+            requested_type, 
+            &expr_context.location
+        ) {
             Ok(expr) => {
                 Ok(
                     AstNode::Expression(
@@ -322,7 +333,8 @@ pub fn parse_number_expression(_: &ParseContext,
             // The number is too big to fit in a u32, so we should use an i64
             return Ok(
                 AstNode::Expression(
-                    U64LiteralExpression::into_expr(number as u64)
+                    U64LiteralExpression::into_expr(number as u64,
+                         expr_context.location.clone())
                 )
             )
         }
@@ -330,7 +342,7 @@ pub fn parse_number_expression(_: &ParseContext,
             // The number is small enough to fit in a u32, so we should use an i32
             return Ok(
                 AstNode::Expression(
-                    U32LiteralExpression::into_expr(number as u32)
+                    U32LiteralExpression::into_expr(number as u32, expr_context.location.clone())
                 )
             )
         }
@@ -354,9 +366,9 @@ pub fn parse_function_call_expr(
     identifier: &String
 ) -> ParseResult<AstNode>
 {
-    let left_paren = match context.advance() {
+    let (left, location) = match context.advance() {
         Some(tok) => match &tok.token_type {
-            TokenType::LeftParen => tok,
+            TokenType::LeftParen => (tok, tok.location.clone()),
             _ => return Err(
                 ParserError::ExpectedXXX(
                     format!("left parenthesis after \"{}\"", identifier),
@@ -372,7 +384,8 @@ pub fn parse_function_call_expr(
 
     let mut argument_exprs: Vec<Box<dyn Expression>> = Vec::new();
     let expr_context = ExpressionContext {
-        typ: &None
+        typ: &None,
+        location: &location
     };
 
     loop {
@@ -387,7 +400,7 @@ pub fn parse_function_call_expr(
                     ParserError::ExpectedXXX(format!("expression, but got \"{}\"", node.display()))
                 )
             },
-            Err(_) => {
+            Err(e) => {
                 /*
                     Walk back here due to parse_expression consuming
                     one token to try parse an expression.
@@ -396,21 +409,18 @@ pub fn parse_function_call_expr(
                     to consume a right paren.
                 */
                 context.walk_back(1);
-                let paren = match context.advance() {
+                let _ = match context.advance() {
                     Some(Token { token_type: TokenType::RightParen, ..}) => {
                         // should be the end of the function call expression.
                         return Ok(
                             AstNode::FunctionCall(FunctionCallExpressionFacts {
                                 name: identifier.clone(),
-                                args: Some(argument_exprs)
+                                args: Some(argument_exprs),
+                                location: left.location.clone(),
                             })
                         )
                     },
-                    _ => return Err(
-                        ParserError::ExpectedXXX(
-                            format!("expected right paren here due to no expression being present.")
-                        )
-                    )
+                    _ => return Err(e)
                 };
             }
         }
@@ -422,7 +432,8 @@ pub fn parse_function_call_expr(
                     AstNode::FunctionCall(
                         FunctionCallExpressionFacts {
                             name: identifier.clone(),
-                            args: Some(argument_exprs)
+                            args: Some(argument_exprs),
+                            location: left.location.clone(),
                         }
                     )
                 )
@@ -472,7 +483,7 @@ pub fn parse_expr_identifier(context: &ParseContext) -> ParseResult<AstNode> {
         return parse_function_call_expr(context, ident);
     }
 
-    todo!("implement chaining operator");
+    todo!("implement chaining operator: next_tok: {:?}", next_tok);
 }
 
 // This function is expected to parse an expression and consume the semi-colon.
@@ -500,7 +511,7 @@ pub fn parse_expression(context: &ParseContext, expr_context: &ExpressionContext
             let _ = parse_semicolon(context);
             Ok(identifier_expr)
         }
-        _ => Err(ParserError::NotImplemented),
+        _ => Err(ParserError::Nothing),
     }
 }
 
@@ -529,13 +540,21 @@ pub fn parse_assignment(context: &ParseContext, constant: bool) -> ParseResult<A
     }
 
     // equals
-    let _ = match context.advance() {
-        Some(Token { token_type: TokenType::Equal, .. }) => true,
+    let equals = match context.advance() {
+        Some(tok) => {
+            match &tok.token_type {
+                TokenType::Equal => tok,
+                _ => return Err(
+                    ParserError::ExpectedXXX("equals".to_owned())
+                )
+            }
+        },
         _ => return Err(ParserError::ExpectedXXX(format!("equals sign for assignment of `{}`", identifier))),
     };
 
     let expr_context = ExpressionContext {
         typ: &annotation,
+        location: &equals.location
     };
 
     let expression = parse_expression(context, &expr_context)?;
@@ -555,7 +574,8 @@ pub fn parse_assignment(context: &ParseContext, constant: bool) -> ParseResult<A
                 arguments: match facts.args {
                     Some(args) => args,
                     None => Vec::new()
-                }
+                },
+                location: facts.location.clone()
             })
         }
         _ => return Err(
@@ -811,6 +831,8 @@ pub fn parse_use_statement(context: &ParseContext) -> ParseResult<AstNode> {
             }
         }
 
+        parse_semicolon(context);
+
         Ok(
             AstNode::UseStatement(
                 UseStatementFacts {
@@ -971,6 +993,64 @@ pub fn parse_trait_declaration(context: &ParseContext) -> ParseResult<AstNode> {
     )
 }
 
+pub fn parse_return_statement(context: &ParseContext) -> ParseResult<AstNode> {
+    let ret_kw = match context.advance() {
+        Some(token) => match &token.token_type {
+            TokenType::Return => token,
+            _ => return Err(
+                ParserError::ExpectedXXX(
+                    "return keyword".to_owned(),
+                )
+            )
+        },
+        None => {
+            return Err(
+                ParserError::ExpectedXXX(
+                    "return keyword".to_owned(),
+                )
+            )
+        }
+    };
+
+    let expr_context = ExpressionContext {
+        typ: &None,
+        location: &ret_kw.location 
+    };
+    let expression = parse_expression(context, &expr_context);
+
+    Ok(
+        AstNode::ReturnStatement(
+            ReturnExpression::into_expr(
+                match expression {
+                    Ok(node) => match node {
+                        AstNode::Expression(expr) => {
+                            Some(expr)
+                        },
+                        _ => return Err(
+                            ParserError::ExpectedXXX(
+                                "expression after return keyword.".to_owned(),
+                            )
+                        )
+                    },
+                    Err(e) => {
+                        match e {
+                            ParserError::Nothing => {
+                                None
+                            },
+                            _ => return Err(
+                                ParserError::ExpectedXXX(
+                                    "single return (void) or return with an expression".to_string(),
+                                )
+                            )
+                        }
+                    }
+                },
+                ret_kw.location.clone(),
+            )
+        )
+    )
+}
+
 pub fn parse_statement(context: &ParseContext) -> Result<AstNode, ParserError> {
     let next = match context.advance() {
         Some(next) => next,
@@ -987,6 +1067,11 @@ pub fn parse_statement(context: &ParseContext) -> Result<AstNode, ParserError> {
 
     if matches(next, TokenType::Eof) {
         return Err(ParserError::Done);
+    }
+
+    if matches(next, TokenType::Return) {
+        context.walk_back(1);
+        return parse_return_statement(context);
     }
 
     if matches(next, TokenType::Fn) {

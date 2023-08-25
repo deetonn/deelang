@@ -1,20 +1,7 @@
-let a: string = "932049258525"
+use std::env::get;
 
-use String = string
-use std::io::print
-
-trait SomeTrait {
-    fn take(self) -> String
+fn get_environment_variable(var: string) -> Option<string> {
+    return get(var);
 }
 
-fn some_function(
-    num: u32, 
-    s: string)
- -> Vec<u32> {
-    const value: u32 = 21
-}
-
-const result = some_function(
-    2, 
-    "Hello, World"
-)
+const path = get_environment_variable("PATH")

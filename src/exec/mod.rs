@@ -1,7 +1,7 @@
 
 use std::path::Path;
 
-use crate::{Lexer, parser::parse};
+use crate::{Lexer, parser::parse, typechecker::TypeCheckerState};
 
 /* this module exists to make running scripts easier. */
 
@@ -23,7 +23,9 @@ fn private_run_script(script_file: &str) -> Result<(), String> {
         file_name: script_file.to_owned(),
         debug: false,
     });
-    println!("ast: {:#?}", result);
+    let checker_state = TypeCheckerState::new(result);
+    let optimized = crate::typechecker::walk_ast(&checker_state);
+    println!("ast: {:#?}", optimized);
 
     Ok(())
 }

@@ -4,6 +4,7 @@ use crate::parser::*;
 #[derive(Clone, Debug, PartialEq)]
 pub struct U32LiteralExpression {
     pub value: u32,
+    pub location: SourceLocation,
 }
 
 impl Expression for U32LiteralExpression {
@@ -14,17 +15,23 @@ impl Expression for U32LiteralExpression {
     fn try_evaluate_type(&self) -> Option<TypeInfo> {
         Some(TypeInfo::unsigned_32bit())
     }
+
+    fn get_source_location(&self) -> SourceLocation {
+        return self.location.clone()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct U64LiteralExpression {
     pub value: u64,
+    pub location: SourceLocation,
 }
 
 impl U64LiteralExpression {
-    pub fn into_expr(value: u64) -> Box<dyn Expression> {
+    pub fn into_expr(value: u64, location: SourceLocation) -> Box<dyn Expression> {
         Box::new(U64LiteralExpression {
-            value
+            value,
+            location
         })
     }
 }
@@ -37,11 +44,16 @@ impl Expression for U64LiteralExpression {
     fn try_evaluate_type(&self) -> Option<TypeInfo> {
         Some(TypeInfo::unsigned_64bit())
     }
+
+    fn get_source_location(&self) -> SourceLocation {
+        return self.location.clone()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct I32LiteralExpression {
     pub value: i32,
+    pub location: SourceLocation,
 }
 
 impl Expression for I32LiteralExpression {
@@ -52,20 +64,26 @@ impl Expression for I32LiteralExpression {
     fn try_evaluate_type(&self) -> Option<TypeInfo> {
         Some(TypeInfo::signed_32bit())
     }
+
+    fn get_source_location(&self) -> SourceLocation {
+        return self.location.clone()
+    }
 }
 
 impl I32LiteralExpression {
-    pub fn into_expr(value: i32) -> Box<dyn Expression> {
+    pub fn into_expr(value: i32, location: SourceLocation) -> Box<dyn Expression> {
         Box::new(I32LiteralExpression {
-            value
+            value,
+            location,
         })
     }
 }
 
 impl U32LiteralExpression {
-    pub fn into_expr(value: u32) -> Box<dyn Expression> {
+    pub fn into_expr(value: u32, location: SourceLocation) -> Box<dyn Expression> {
         Box::new(U32LiteralExpression {
-            value
+            value,
+            location
         })
     }
 }
@@ -73,6 +91,7 @@ impl U32LiteralExpression {
 #[derive(Clone, Debug, PartialEq)]
 pub struct BoolLiteralExpression {
     pub value: bool,
+    pub location: SourceLocation,
 }
 
 impl Expression for BoolLiteralExpression {
@@ -83,12 +102,17 @@ impl Expression for BoolLiteralExpression {
     fn try_evaluate_type(&self) -> Option<TypeInfo> {
         Some(TypeInfo::boolean())
     }
+
+    fn get_source_location(&self) -> SourceLocation {
+        self.location.clone()
+    }
 }
 
 impl BoolLiteralExpression {
-    pub fn into_expr(value: bool) -> Box<dyn Expression> {
+    pub fn into_expr(value: bool, location: SourceLocation) -> Box<dyn Expression> {
         Box::new(BoolLiteralExpression {
-            value
+            value,
+            location
         })
     }
 }
@@ -96,6 +120,7 @@ impl BoolLiteralExpression {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CharLiteralExpression {
     pub value: char,
+    pub location: SourceLocation,
 }
 
 impl Expression for CharLiteralExpression {
@@ -106,12 +131,17 @@ impl Expression for CharLiteralExpression {
     fn try_evaluate_type(&self) -> Option<TypeInfo> {
         Some(TypeInfo::character())
     }
+
+    fn get_source_location(&self) -> SourceLocation {
+        self.location.clone()
+    }
 }
 
 impl CharLiteralExpression {
-    pub fn into_expr(value: char) -> Box<dyn Expression> {
+    pub fn into_expr(value: char, location: SourceLocation) -> Box<dyn Expression> {
         Box::new(CharLiteralExpression {
-            value
+            value,
+            location
         })
     }
 }
@@ -120,6 +150,7 @@ impl CharLiteralExpression {
 #[derive(Clone, Debug, PartialEq)]
 pub struct I64LiteralExpression {
     pub value: i64,
+    pub location: SourceLocation,
 }
 
 impl Expression for I64LiteralExpression {
@@ -136,12 +167,17 @@ impl Expression for I64LiteralExpression {
             generics: None,
         })
     }
+
+    fn get_source_location(&self) -> SourceLocation {
+        self.location.clone()
+    }
 }
 
 impl I64LiteralExpression {
-    pub fn into_expr(value: i64) -> Box<dyn Expression> {
+    pub fn into_expr(value: i64, location: SourceLocation) -> Box<dyn Expression> {
         Box::new(I64LiteralExpression {
-            value
+            value,
+            location
         })
     }
 }
@@ -149,6 +185,7 @@ impl I64LiteralExpression {
 #[derive(Clone, Debug, PartialEq)]
 pub struct StringLiteralExpression {
     pub value: String,
+    pub location: SourceLocation,
 }
 
 impl Expression for StringLiteralExpression {
@@ -159,12 +196,17 @@ impl Expression for StringLiteralExpression {
     fn try_evaluate_type(&self) -> Option<TypeInfo> {
         Some(TypeInfo::string())
     }
+
+    fn get_source_location(&self) -> SourceLocation {
+        self.location.clone()
+    }
 }
 
 impl StringLiteralExpression {
-    pub fn into_expr(value: String) -> Box<dyn Expression> {
+    pub fn into_expr(value: String, location: SourceLocation) -> Box<dyn Expression> {
         Box::new(StringLiteralExpression {
-            value
+            value,
+            location
         })
     }
 }
@@ -176,6 +218,8 @@ pub struct VariableReferenceExpression {
     pub name: String,
     // The type of the variable being assigned to, if applicable.
     pub assigne_type: Option<TypeInfo>,
+
+    pub location: SourceLocation,
 }
 
 impl Expression for VariableReferenceExpression {
@@ -186,12 +230,18 @@ impl Expression for VariableReferenceExpression {
     fn try_evaluate_type(&self) -> Option<TypeInfo> {
         self.assigne_type.clone()
     }
+
+    fn get_source_location(&self) -> SourceLocation {
+        self.location.clone()
+    }
 }
 
 #[derive(Debug, PartialEq)]
 pub struct FunctionCallExpression {
     pub name: String,
     pub arguments: Vec<Box<dyn Expression>>,
+
+    pub location: SourceLocation,
 }
 
 impl Clone for FunctionCallExpression {
@@ -203,6 +253,7 @@ impl Clone for FunctionCallExpression {
         FunctionCallExpression {
             name: self.name.clone(),
             arguments: new_vector,
+            location: self.location.clone()
         }
     }
 }
@@ -214,6 +265,63 @@ impl Expression for FunctionCallExpression {
 
     fn try_evaluate_type(&self) -> Option<TypeInfo> {
         None
+    }
+
+    fn get_source_location(&self) -> SourceLocation {
+        self.location.clone()
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ReturnExpression {
+    pub value: Option<Box<dyn Expression>>,
+    pub location: SourceLocation,
+}
+
+impl Expression for ReturnExpression {
+    fn evaluate(&self) -> ValueType {
+        if let Some(expr) = &self.value {
+            expr.evaluate()
+        }
+        else {
+            ValueType::Void(())
+        }
+    }
+
+    fn get_source_location(&self) -> SourceLocation {
+        self.location.clone()
+    }
+
+    fn try_evaluate_type(&self) -> Option<TypeInfo> {
+        if let Some(expr) = &self.value {
+            expr.try_evaluate_type()
+        }
+        else {
+            None
+        }
+    }
+}
+
+impl Clone for ReturnExpression {
+    fn clone(&self) -> Self {
+        Self {
+            value: match &self.value {
+                Some(expr) => {
+                    Some(dyn_clone::clone_box(expr.as_ref()))
+                },
+                None => None,
+            },
+            location: self.location.clone(),
+        }
+    }
+}
+
+impl ReturnExpression {
+    pub fn into_expr(value: Option<Box<dyn Expression>>, loc: SourceLocation) -> ReturnExpression {
+        ReturnExpression {
+            value,
+            location: loc
+        }
     }
 }
 

@@ -355,7 +355,7 @@ impl Lexer {
         let result = self.source.chars().nth(self.position + ahead);
         match result {
             Some(c) => Some(c),
-            None => panic!("peek() called at EOF."),
+            None => None,
         }
     }
 

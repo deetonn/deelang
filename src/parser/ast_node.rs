@@ -2,7 +2,9 @@ use std::{fmt::{Debug, Display}, mem::size_of};
 use once_cell::sync::Lazy;
 use std::{sync::Mutex, collections::HashMap};
 
-use super::expressions::{VariableReferenceExpression, FunctionCallExpression};
+use crate::tokenizer::SourceLocation;
+
+use super::expressions::{VariableReferenceExpression, FunctionCallExpression, ReturnExpression};
 
 trait VecExt<T> {
     fn internal_copy(&self) -> Vec<T>;
@@ -336,7 +338,9 @@ impl Clone for ParameterFacts {
 pub struct FunctionCallExpressionFacts {
     pub name: String,
     // an actual function call accepts expression arguments
-    pub args: Option<Vec<Box<dyn Expression>>>
+    pub args: Option<Vec<Box<dyn Expression>>>,
+
+    pub location: SourceLocation,
 }
 
 impl Clone for FunctionCallExpressionFacts {
@@ -358,7 +362,8 @@ impl Clone for FunctionCallExpressionFacts {
             args: match new_args {
                 Some(v) => Some(v),
                 None => None
-            }
+            },
+            location: self.location.clone(),
         }
     }
 }
@@ -608,6 +613,8 @@ pub trait Expression: DynClone {
     fn try_evaluate_type(&self) -> Option<TypeInfo> {
         return None;
     }
+
+    fn get_source_location(&self) -> SourceLocation;
 }
 
 impl PartialEq for dyn Expression {
@@ -704,6 +711,7 @@ pub enum AstNode {
     TypeAlias(TypeAliasFacts),
     UseStatement(UseStatementFacts),
     TraitDeclaration(TraitFacts),
+    ReturnStatement(ReturnExpression),
 
     // in the case of `;`, we don't need to store anything.
     EmptyExpr,
@@ -712,41 +720,44 @@ pub enum AstNode {
 impl AstNode {
     pub fn display(&self) -> String {
         match self {
-            AstNode::Assignment(facts) => {
-                format!("assignment")
+            AstNode::Assignment(_) => {
+                format!("Assignment")
             },
-            AstNode::Body(facts) => {
-                format!("body")
+            AstNode::Body(_) => {
+                format!("Body")
             },
             AstNode::EmptyExpr => "Empty Expression".to_owned(),
             AstNode::Enum(facts) => {
                 format!("declaration of enum \"{}\"", facts.name)
             },
             AstNode::Expression(expr) => {
-                format!("expression [type={}]", match expr.try_evaluate_type() {
+                format!("Expression [type={}]", match expr.try_evaluate_type() {
                     Some(t) => t.name,
                     None => "unknown".to_owned()
                 })
             },
-            AstNode::FunctionCall(facts) => {
-                "function call".to_owned()
+            AstNode::FunctionCall(_) => {
+                "Function Call".to_owned()
             },
             AstNode::FunctionDeclaration(facts) => {
-                format!("declaration of function \"{}\"", facts.name)
+                format!("Function Declaration \"{}\"", facts.name)
             },
             AstNode::Struct(facts) => {
-                format!("declaration of struct \"{}\"", facts.name)
+                format!("Struct Declaration \"{}\"", facts.name)
             },
             AstNode::TraitDeclaration(facts) => {
-                format!("declaration of trait \"{}\"", facts.name)
+                format!("Trait Declaration\"{}\"", facts.name)
             },
             AstNode::TypeAlias(alias) => {
-                format!("type alias [{} = {}]", 
+                format!("TypeAlias [{} = {}]", 
                     alias.name,
                     alias.type_info.name)
             },
-            AstNode::UseStatement(facts) => {
-                format!("use statement")
+            AstNode::UseStatement(_) => {
+                format!("UseStmt")
+            },
+            AstNode::ReturnStatement(_) => {
+                format!("Return")
             }
         }
     }
@@ -787,6 +798,9 @@ impl Clone for AstNode {
             },
             AstNode::TraitDeclaration(trait_facts) => {
                 return AstNode::TraitDeclaration(trait_facts.clone());
+            },
+            AstNode::ReturnStatement(expr) => {
+                return AstNode::ReturnStatement(expr.clone())
             }
         }
     }
@@ -881,6 +895,14 @@ impl PartialEq for AstNode {
                         return trait_facts == other_trait_facts;
                     },
                     _ => return false,
+                }
+            },
+            AstNode::ReturnStatement(expr) => {
+                match other {
+                    AstNode::ReturnStatement(other_expr) => {
+                        expr == other_expr
+                    },
+                    _ => false,
                 }
             }
         }

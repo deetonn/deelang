@@ -85,3 +85,245 @@
  enable by the previous ones.
     
 */
+
+use std::cell::{Cell, RefCell, Ref};
+
+use crate::parser::ast_node::{
+  FunctionDeclarationFacts,
+  AssignmentFacts,
+  TraitFacts, TypeAliasFacts
+};
+
+use crate::parser::ast_node::AstNode;
+use crate::tokenizer::SourceLocation;
+
+#[derive(Debug, Clone)]
+pub enum Declaration {
+  Variable(AssignmentFacts),
+  Function(FunctionDeclarationFacts),
+  Trait(TraitFacts),
+  Typedef(TypeAliasFacts),
+
+  Nothing,
+}
+
+pub struct CheckerError {
+  pub message: String,
+  pub location: SourceLocation,
+}
+
+type CheckerResult = Result<AstNode, CheckerError>;
+
+impl CheckerError {
+  pub fn new(message: String, 
+    location: &SourceLocation) -> CheckerError {
+    return CheckerError {
+      message,
+      location: location.clone()
+    }
+  }
+}
+
+pub enum CheckStatus {
+  // Okay just signifies that the expression/statement is ok.
+  Okay,
+  Optimized(AstNode),
+  Failed(CheckerError),
+  Done,
+}
+
+pub struct CheckedDeclaration {
+  decl: Declaration,
+}
+
+impl CheckedDeclaration {
+  pub fn new(declaration: Declaration) -> CheckedDeclaration {
+    Self {
+      decl: declaration
+    }
+  }
+}
+
+pub struct TypeCheckerState {
+  pub ast: Vec<AstNode>,
+  pub position: Cell<usize>,
+
+  pub declarations: RefCell<Vec<CheckedDeclaration>>
+}
+
+impl TypeCheckerState {
+  pub fn new(ast: Vec<AstNode>) -> TypeCheckerState {
+    TypeCheckerState { 
+      ast, 
+      position: Cell::new(0),
+      declarations: RefCell::new(Vec::new()) }
+  }
+
+  pub fn advance(&self) -> Option<&AstNode> {
+    let current_pos = self.position.get();
+    if current_pos >= self.ast.len() {
+      return None;
+    }
+    self.position.set(current_pos + 1);
+    Some(&self.ast[self.position.get()])
+  }
+
+  pub fn walk_back(&self, by: usize) {
+    self.position.set(self.position.get() - by);
+  }
+
+  pub fn get_declaration(&self, name: &String) -> Ref<'_, Declaration> {
+    let interior = self.declarations.borrow();
+    let data = Ref::map(interior, |x| {
+      for item in x {
+        match &item.decl {
+          Declaration::Function(facts) => {
+            if facts.name == *name {
+              return &item.decl;
+            }
+          },
+          Declaration::Variable(facts) => {
+            if facts.name == *name {
+              return &item.decl;
+            }
+          },
+          Declaration::Typedef(facts) => {
+            if facts.name == *name {
+              return &item.decl;
+            }
+          },
+          Declaration::Trait(facts) => {
+            if facts.name == *name {
+              return &item.decl;
+            }
+          },
+          Declaration::Nothing => break
+        }
+      }
+      
+      &Declaration::Nothing
+    });
+
+    data
+  }
+}
+
+pub fn just_walk_declarations(state: &TypeCheckerState) {
+  while let Some(statement) = state.advance() {
+    match statement {
+      AstNode::Assignment(assignment) => {
+        state.declarations.borrow_mut().push(CheckedDeclaration {
+          decl: Declaration::Variable(
+            assignment.clone()
+          )
+        })
+      },
+      AstNode::FunctionDeclaration(function) => {
+        state.declarations.borrow_mut().push(CheckedDeclaration {
+          decl: Declaration::Function(
+            function.clone()
+          )
+        })
+      },
+      AstNode::TraitDeclaration(trait_decl) => {
+        state.declarations.borrow_mut().push(CheckedDeclaration {
+          decl: Declaration::Trait(
+            trait_decl.clone()
+          )
+        })
+      },
+      AstNode::TypeAlias(alias) => {
+        state.declarations.borrow_mut().push(CheckedDeclaration {
+          decl: Declaration::Typedef(
+            alias.clone()
+          )
+        })
+      },
+      AstNode::Struct(_) => todo!("implement struct"),
+      _ => continue
+    }
+  }
+
+  state.walk_back(state.position.get());
+}
+
+pub fn visit_assignment(
+  state: &TypeCheckerState,
+  facts: &AssignmentFacts,
+) -> CheckerResult {
+  // we need to make sure whatever is being assigned to
+  // this exists.
+
+  let expr_type = facts.expression.try_evaluate_type();
+
+  if let Some(type_info) = expr_type {
+    // FIXME: This .clone() is a heavy one, what the fuck is Ref<'_, ...> ??? 
+    //        How do i dereference it???? So fucking baffling.
+    //        The size of Declaration is 248 at the time of writing this,
+    //        so cloning DOES NOT seem like a good idea.
+    let type_exists = match state.get_declaration(&type_info.name).clone() {
+      Declaration::Nothing => false,
+      _ => true
+    };
+    if !type_exists {
+      return Err(
+        CheckerError::new(
+          format!("The type \"{}\" does not exist.", type_info.name),
+          &facts.expression.get_source_location(),
+        )
+      )
+    }
+  }
+
+  // At this point, the type exists, now we just verify they
+  // match.
+  if let Some(actual_type) = facts.expression.try_evaluate_type() {
+    if let Some(requested_type) = &facts.type_info {
+      if &actual_type != requested_type {
+        return Err(
+          CheckerError::new(
+            format!("cannot assign an entity of type \"{}\" to a variable typed \"{}\"",
+            actual_type.name, requested_type.name),
+            &facts.expression.get_source_location()
+          )
+        )
+      }
+    }
+  }
+
+  let actual_type = facts.expression.try_evaluate_type();
+
+  return Ok(
+    AstNode::Assignment(
+      AssignmentFacts {
+        name: facts.name.clone(),
+        type_info: actual_type.clone(),
+        constant: facts.constant,
+        expression: dyn_clone::clone_box(facts.expression.as_ref()),
+      }
+    )
+  )
+}
+
+pub fn visit_expressions(state: &TypeCheckerState) -> CheckStatus {
+  while let Some(statement) = state.advance() {
+    let result = match statement {
+      AstNode::Assignment(facts) => {
+        visit_assignment(state, facts)
+      },
+      _ => todo!()
+    };
+  }
+
+  return CheckStatus::Done;
+}
+
+// This function will walk the AST until all types have been checked
+// and all possible optimizations have been applied.
+pub fn walk_ast(state: &TypeCheckerState) -> Vec<AstNode> {
+  // walk declarations, so we can store them for lookups when
+  // checking expressions.
+  just_walk_declarations(state);
+
+  todo!("type checker");
+}
