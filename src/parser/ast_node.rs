@@ -24,16 +24,21 @@ pub struct GenericArgument {
     pub type_info: Option<TypeInfo>,
 }
 
+
+pub const NEEDS_RESOLVE_SIZE_POS: u32 = 0;
+/* This field describes if the type has any information about it yet. */
+/* This does not tell you that the type exists, only whether we have info about it yet. */
+pub const NEEDS_RESOLVE_TYPE: u32 = 1;
+
+pub const RESOLVED_TYPE: u32 = 3;
+pub const UNRESOLVED_WITH_SIZE: u32 = 1;
+pub const UNRESOLVED_TYPE: u32 = 0;
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct TypeInfo {
     pub name: String,
     pub size: usize,
-    pub needs_to_resolve_size: bool,
-
-    /* This field describes if the type has any information about it yet. */
-    /* This does not tell you that the type exists, only whether we have info about it yet. */
-    pub has_been_resolved: bool,
-
+    pub flags: u32,
     pub generics: Option<Vec<GenericArgument>>,
 }
 
@@ -55,12 +60,19 @@ impl TypeInfo {
         }
     }
 
+    pub fn needs_to_resolve_size(&self) -> bool {
+        return (self.flags >> NEEDS_RESOLVE_SIZE_POS) & 1 == 1;
+    }
+
+    pub fn has_been_resolved(&self) -> bool {
+        return (self.flags >> NEEDS_RESOLVE_TYPE) & 1 == 1;
+    }
+
     pub fn void() -> TypeInfo {
         TypeInfo {
             name: "void".to_owned(),
             size: 0,
-            needs_to_resolve_size: false,
-            has_been_resolved: true,
+            flags: RESOLVED_TYPE,
             generics: None
         }
     }
@@ -69,8 +81,7 @@ impl TypeInfo {
         TypeInfo {
             name: "u32".to_owned(),
             size: 4,
-            needs_to_resolve_size: false,
-            has_been_resolved: true,
+            flags: RESOLVED_TYPE,
             generics: None
         }
     } 
@@ -79,8 +90,7 @@ impl TypeInfo {
         TypeInfo {
             name: "i32".to_owned(),
             size: 4,
-            needs_to_resolve_size: false,
-            has_been_resolved: true,
+            flags: RESOLVED_TYPE,
             generics: None
         }
     }
@@ -89,8 +99,7 @@ impl TypeInfo {
         TypeInfo {
             name: "u64".to_owned(),
             size: 8,
-            needs_to_resolve_size: false,
-            has_been_resolved: true,
+            flags: RESOLVED_TYPE,
             generics: None
         }
     }
@@ -99,8 +108,7 @@ impl TypeInfo {
         TypeInfo {
             name: "i64".to_owned(),
             size: 8,
-            needs_to_resolve_size: false,
-            has_been_resolved: true,
+            flags: RESOLVED_TYPE,
             generics: None
         }
     }
@@ -109,8 +117,7 @@ impl TypeInfo {
         TypeInfo {
             name: "f32".to_owned(),
             size: 4,
-            needs_to_resolve_size: false,
-            has_been_resolved: true,
+            flags: RESOLVED_TYPE,
             generics: None
         }
     }
@@ -119,8 +126,7 @@ impl TypeInfo {
         TypeInfo {
             name: "f64".to_owned(),
             size: 8,
-            needs_to_resolve_size: false,
-            has_been_resolved: true,
+            flags: RESOLVED_TYPE,
             generics: None
         }
     }
@@ -129,8 +135,7 @@ impl TypeInfo {
         TypeInfo {
             name: "bool".to_owned(),
             size: 1,
-            needs_to_resolve_size: false,
-            has_been_resolved: true,
+            flags: RESOLVED_TYPE,
             generics: None
         }
     }
@@ -139,8 +144,7 @@ impl TypeInfo {
         TypeInfo {
             name: "char".to_owned(),
             size: 1,
-            needs_to_resolve_size: false,
-            has_been_resolved: true,
+            flags: RESOLVED_TYPE,
             generics: None
         }
     }
@@ -150,8 +154,7 @@ impl TypeInfo {
             name: "string".to_owned(),
             // string is a pointer type.
             size: size_of::<usize>(),
-            needs_to_resolve_size: true,
-            has_been_resolved: true,
+            flags: RESOLVED_TYPE,
             generics: None
         }
     }
@@ -160,8 +163,7 @@ impl TypeInfo {
         TypeInfo {
             name: "size_t".to_owned(),
             size: size_of::<usize>(),
-            needs_to_resolve_size: false,
-            has_been_resolved: true,
+            flags: RESOLVED_TYPE,
             generics: None
         }
     }
@@ -227,8 +229,7 @@ impl TypeInfo {
         TypeInfo {
             name: String::new(),
             size: 0,
-            needs_to_resolve_size: true,
-            has_been_resolved: false,
+            flags: UNRESOLVED_TYPE,
             generics: None
         }
     }
@@ -254,7 +255,7 @@ static BUILTIN_TYPES: Lazy<Mutex<HashMap<&'static str, TypeInfo>>> = Lazy::new(|
 
 impl TypeInfo {
     pub fn size_was_resolved(&self) -> bool {
-        return !self.needs_to_resolve_size;
+        return !self.needs_to_resolve_size();
     } 
 
     pub fn try_resolve_size(&mut self) {
@@ -268,7 +269,7 @@ impl TypeInfo {
 
         self.name = type_info.name.clone();
         self.size = type_info.size;
-        self.needs_to_resolve_size = false;
+        self.flags |= 1 & NEEDS_RESOLVE_TYPE;
     }
 }
 
@@ -299,6 +300,7 @@ impl Clone for StructField {
                 ValueType::Enum(value) => ValueType::Enum(value.clone()),
                 ValueType::VariableReference(value) => ValueType::VariableReference(value.clone()),
                 ValueType::FunctionCall(value) => ValueType::FunctionCall(value.clone()),
+                ValueType::ChainExpr(value) => ValueType::ChainExpr(value.clone()),
             },
         }
     }
@@ -369,19 +371,19 @@ impl Clone for FunctionCallExpressionFacts {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct StructFacts {
+pub struct StructDeclarationFacts {
     pub name: String,
     pub fields: Option<Vec<StructField>>
 }
 
-impl Clone for StructFacts {
+impl Clone for StructDeclarationFacts {
     fn clone(&self) -> Self {
         let new_fields = match &self.fields {
             Some(fields) => Some(fields.internal_copy()),
             None => None,
         };
 
-        StructFacts {
+        StructDeclarationFacts {
             name: self.name.clone(),
             fields: new_fields,
         }
@@ -432,8 +434,9 @@ pub enum ValueType {
     String(String), 
     Char(char), 
     Void(()), 
-    Struct(StructFacts),
+    Struct(StructDeclarationFacts),
     Enum(EnumFacts),
+    ChainExpr(Vec<String>),
 
     VariableReference(VariableReferenceExpression),
     FunctionCall(FunctionCallExpression)
@@ -553,6 +556,23 @@ impl PartialEq for ValueType {
                     },
                     _ => return false,
                 }
+            },
+            ValueType::ChainExpr(expr) => {
+                match other {
+                    ValueType::ChainExpr(other_chain) => {
+                        if expr.len() != other_chain.len() {
+                            return false;
+                        }
+                        for i in 0..expr.len() {
+                            if expr[i] != other_chain[i] {
+                                return false;
+                            }
+                        }
+
+                        return true;
+                    },
+                    _ => false,
+                }
             }
         }
     }
@@ -577,6 +597,14 @@ impl Display for ValueType {
             ValueType::FunctionCall(expr) => {
                 write!(f, "<call to '{}'>", expr.name)
             },
+            ValueType::ChainExpr(chain) => {
+                if let Some(last) = chain.last() {
+                    write!(f, "<chain leading to \"{}\">", last)
+                }
+                else {
+                    write!(f, "<invalid chain>")
+                }
+            }
         }
     }
 }
@@ -699,11 +727,15 @@ pub struct TraitFacts {
     pub functions: Vec<FunctionDeclarationFacts>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ChainFacts {
+    pub variables: Vec<String>,
+}
+
 #[derive(Debug)]
 pub enum AstNode {
     Assignment(AssignmentFacts),
     Expression(Box<dyn Expression>),
-    Struct(StructFacts),
     Enum(EnumFacts),
     FunctionCall(FunctionCallExpressionFacts),
     FunctionDeclaration(FunctionDeclarationFacts),
@@ -711,7 +743,9 @@ pub enum AstNode {
     TypeAlias(TypeAliasFacts),
     UseStatement(UseStatementFacts),
     TraitDeclaration(TraitFacts),
+    StructDeclaration(StructDeclarationFacts),
     ReturnStatement(ReturnExpression),
+    ChainExpression(ChainFacts),
 
     // in the case of `;`, we don't need to store anything.
     EmptyExpr,
@@ -742,7 +776,7 @@ impl AstNode {
             AstNode::FunctionDeclaration(facts) => {
                 format!("Function Declaration \"{}\"", facts.name)
             },
-            AstNode::Struct(facts) => {
+            AstNode::StructDeclaration(facts) => {
                 format!("Struct Declaration \"{}\"", facts.name)
             },
             AstNode::TraitDeclaration(facts) => {
@@ -758,6 +792,15 @@ impl AstNode {
             },
             AstNode::ReturnStatement(_) => {
                 format!("Return")
+            },
+            AstNode::ChainExpression(facts) => {
+                let mut result = String::new();
+                for v in facts.variables.iter() {
+                    result += &v;
+                    result += ".";
+                }
+                result.remove(result.len() - 1);
+                return result;
             }
         }
     }
@@ -772,8 +815,8 @@ impl Clone for AstNode {
             AstNode::Expression(expr) => {
                 return AstNode::Expression(dyn_clone::clone_box(&**expr));
             },
-            AstNode::Struct(facts) => {
-                return AstNode::Struct(facts.clone());
+            AstNode::StructDeclaration(facts) => {
+                return AstNode::StructDeclaration(facts.clone());
             },
             AstNode::Enum(facts) => {
                 return AstNode::Enum(facts.clone());
@@ -801,6 +844,9 @@ impl Clone for AstNode {
             },
             AstNode::ReturnStatement(expr) => {
                 return AstNode::ReturnStatement(expr.clone())
+            },
+            AstNode::ChainExpression(facts) => {
+                Self::ChainExpression(facts.clone())
             }
         }
     }
@@ -825,9 +871,9 @@ impl PartialEq for AstNode {
                     _ => return false,
                 }
             },
-            AstNode::Struct(facts) => {
+            AstNode::StructDeclaration(facts) => {
                 match other {
-                    AstNode::Struct(other_facts) => {
+                    AstNode::StructDeclaration(other_facts) => {
                         return facts == other_facts;
                     },
                     _ => return false,
@@ -904,7 +950,34 @@ impl PartialEq for AstNode {
                     },
                     _ => false,
                 }
+            },
+            AstNode::ChainExpression(facts) => {
+                match other {
+                    AstNode::ChainExpression(other_facts) => {
+                        return compare_chain_expression(facts, other_facts);
+                    },
+                    _ => false,
+                }
             }
         }
+    }
+}
+
+pub fn compare_chain_expression(left: &ChainFacts, right: &ChainFacts) -> bool {
+    if left.variables.len() != right.variables.len() {
+        return false;
+    }
+    else {
+        let len = left.variables.len();
+        for i in 0..len {
+            let left_name = &left.variables[i];
+            let right_name = &right.variables[i];
+
+            if left_name != right_name {
+                return false;
+            }
+        }
+
+        true
     }
 }

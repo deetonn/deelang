@@ -146,8 +146,7 @@ pub fn parse_typename(context: &ParseContext) -> Option<TypeInfo> {
             Some(TypeInfo {
                 name: ident.clone(),
                 size: 0,
-                needs_to_resolve_size: true,
-                has_been_resolved: false,
+                flags: UNRESOLVED_WITH_SIZE,
                 generics: None
             })
         },
@@ -184,8 +183,7 @@ pub fn parse_typename(context: &ParseContext) -> Option<TypeInfo> {
             return Some(TypeInfo {
                 name: identifier.unwrap().name,
                 size: 0,
-                needs_to_resolve_size: true,
-                has_been_resolved: false,
+                flags: UNRESOLVED_WITH_SIZE,
                 generics: Some(generics)
             });
         },
@@ -389,13 +387,29 @@ pub fn parse_function_call_expr(
     };
 
     loop {
+        if let Some(Token {token_type: TokenType::RightParen, ..}) = context.advance() {
+            break Ok(
+                AstNode::FunctionCall(FunctionCallExpressionFacts {
+                    name: identifier.clone(),
+                    args: Some(argument_exprs),
+                    location: left.location.clone(),
+                })
+            )
+        }
+        else {
+            context.walk_back(1)
+        }
+
         let next = parse_expression(context, &expr_context);
 
         match next {
             Ok(node) => match node {
                 AstNode::Expression(expr) => {
-                    argument_exprs.push(expr)
+                    argument_exprs.push(expr);
                 },
+                AstNode::ChainExpression(facts) => {
+                    argument_exprs.push(ChainingExpression::into_expr(&facts, &left.location))
+                }
                 _ => return Err(
                     ParserError::ExpectedXXX(format!("expression, but got \"{}\"", node.display()))
                 )
@@ -456,14 +470,40 @@ pub fn parse_function_call_expr(
     }
 }
 
+pub fn parse_chaining_operation(context: &ParseContext, first_identifier: &String) -> ParseResult<AstNode> {
+    let mut chain: Vec<String> = Vec::new();
+    chain.push(first_identifier.clone());
+
+    loop {
+        let next = context.advance();
+
+        match next {
+            Some(Token { token_type: TokenType::Dot, .. }) => {
+                if let Some(Token { token_type: TokenType::Identifier(ident), .. }) = context.advance() {
+                    chain.push(ident.clone());
+                } else {
+                    return Err(ParserError::ExpectedXXX("identifier after dot in chain".to_owned()));
+                }
+            },
+            _ => {
+                context.walk_back(1);
+                break;
+            }
+        }
+    }
+
+    Ok(AstNode::ChainExpression(ChainFacts { variables: chain }))
+    
+}
+
 /*
   This function is responsible for parsing any expression that begins with an identifier.
   So function calls, variable declarations, variable assignments, etc.
 */
 pub fn parse_expr_identifier(context: &ParseContext) -> ParseResult<AstNode> {
-    let ident = match context.advance() {
+    let (ident, tok) = match context.advance() {
         Some(token) => match &token.token_type {
-            TokenType::Identifier(ident) => ident,
+            TokenType::Identifier(ident) => (ident, token),
             _ => return Err(
                 ParserError::ExpectedXXX(
                     format!("identifier, but got {}", token.token_type.format_for_err())
@@ -483,7 +523,23 @@ pub fn parse_expr_identifier(context: &ParseContext) -> ParseResult<AstNode> {
         return parse_function_call_expr(context, ident);
     }
 
-    todo!("implement chaining operator: next_tok: {:?}", next_tok);
+    if let Some(Token {token_type: TokenType::Dot, ..}) = next_tok {
+        context.walk_back(1);
+        return parse_chaining_operation(context, ident);
+    }
+
+    // to revert previous advance()
+    context.walk_back(1);
+
+    return Ok(
+        AstNode::Expression(
+            VariableReferenceExpression::into_expr(
+                ident.clone(), 
+                None,
+                tok.location.clone(),
+            )
+        )
+    )
 }
 
 // This function is expected to parse an expression and consume the semi-colon.
@@ -971,8 +1027,7 @@ pub fn parse_trait_declaration(context: &ParseContext) -> ParseResult<AstNode> {
                     TypeInfo {
                         name: identifier.name.clone(),
                         size: 0,
-                        needs_to_resolve_size: true,
-                        has_been_resolved: false,
+                        flags: UNRESOLVED_WITH_SIZE,
                         generics: None,
                     }
                 ))?;
@@ -1026,6 +1081,18 @@ pub fn parse_return_statement(context: &ParseContext) -> ParseResult<AstNode> {
                         AstNode::Expression(expr) => {
                             Some(expr)
                         },
+                        AstNode::FunctionCall(facts) => {
+                            Some(
+                                Box::new(FunctionCallExpression {
+                                    name: facts.name,
+                                    arguments: match facts.args {
+                                        Some(args) => args,
+                                        _ => Vec::new()
+                                    },
+                                    location: facts.location.clone(),
+                                })
+                            )
+                        }
                         _ => return Err(
                             ParserError::ExpectedXXX(
                                 "expression after return keyword.".to_owned(),
@@ -1049,6 +1116,82 @@ pub fn parse_return_statement(context: &ParseContext) -> ParseResult<AstNode> {
             )
         )
     )
+}
+
+pub fn parse_struct_member(context: &ParseContext) -> ParseResult<StructField> {
+    let identifier = match context.advance() {
+        Some(Token { token_type: TokenType::Identifier(ident), ..}) => ident,
+        _ => return Err(ParserError::ExpectedXXX("identifier".to_string())),
+    };
+
+    let _colon = match context.advance() {
+        Some(Token{ token_type: TokenType::Colon, ..}) => (),
+        _ => return Err(ParserError::ExpectedXXX(format!("colon after \"{}\"", identifier))),
+    };
+
+    if let Some(info) = parse_typename(context) {
+        return Ok(
+            StructField {
+                name: identifier.clone(),
+                type_info: info,
+                value: ValueType::Void(())
+            }
+        )
+    }
+    else {
+        return Err(
+            ParserError::ExpectedXXX(format!("typename after colon"))
+        )
+    }
+}
+
+pub fn parse_struct_declaration(context: &ParseContext) -> ParseResult<AstNode> {
+    // `struct` keyword.
+    let _ = match context.advance() {
+        Some(Token { token_type: TokenType::Struct, .. }) => true,
+        _ => return Err(ParserError::ExpectedXXX("struct".to_owned())),
+    };
+
+    let identifier = match context.advance() {
+        Some(Token { token_type: TokenType::Identifier(ident), .. }) => ident,
+        _ => return Err(ParserError::ExpectedXXX("identifier".to_owned())),
+    };
+
+    let _ = match context.advance() {
+        Some(Token { token_type: TokenType::LeftBrace, .. }) => true,
+        _ => return Err(ParserError::ExpectedXXX("left brace".to_owned())),
+    };
+
+    let mut fields: Vec<StructField> = Vec::new();
+
+    loop {
+        let current = context.advance();
+
+        if let Some(Token { token_type: TokenType::RightBrace, .. }) = current {
+            break;
+        }
+        else if let Some(Token { token_type: TokenType::Identifier(_), .. }) = current {
+            context.position.set(context.position.get() - 1);
+            let field = parse_struct_member(context)?;
+            fields.push(field);
+        }
+        else if let Some(Token { token_type: TokenType::Comma, .. }) = current {
+            continue;
+        }
+        else {
+            return Err(ParserError::ExpectedXXX("identifier, comma, or right brace".to_owned()));
+        }
+    }
+
+    Ok(
+        AstNode::StructDeclaration(
+            StructDeclarationFacts {
+                name: identifier.clone(),
+                fields: Some(fields),
+            }
+        )
+    )
+    
 }
 
 pub fn parse_statement(context: &ParseContext) -> Result<AstNode, ParserError> {
@@ -1096,6 +1239,11 @@ pub fn parse_statement(context: &ParseContext) -> Result<AstNode, ParserError> {
 
     if matches(next, TokenType::While) {
         todo!("Implement all of the conditional operators before implementing while loops.");
+    }
+
+    if matches(next, TokenType::Struct) {
+        context.walk_back(1);
+        return parse_struct_declaration(context);
     }
 
     Err(ParserError::ExpectedXXX(format!("statement, but got token {:?}", next.token_type)))

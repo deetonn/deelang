@@ -88,10 +88,11 @@
 
 use std::cell::{Cell, RefCell, Ref};
 
+use crate::err::display_fatal;
 use crate::parser::ast_node::{
   FunctionDeclarationFacts,
   AssignmentFacts,
-  TraitFacts, TypeAliasFacts
+  TraitFacts, TypeAliasFacts, StructDeclarationFacts
 };
 
 use crate::parser::ast_node::AstNode;
@@ -105,6 +106,18 @@ pub enum Declaration {
   Typedef(TypeAliasFacts),
 
   Nothing,
+}
+
+impl Declaration {
+  pub fn from_node(node: AstNode) -> Declaration {
+    match &node {
+      AstNode::Assignment(facts) => Declaration::Variable(facts.clone()),
+      AstNode::FunctionDeclaration(facts) => Declaration::Function(facts.clone()),
+      AstNode::TraitDeclaration(facts) => Declaration::Trait(facts.clone()),
+      AstNode::TypeAlias(facts) => Declaration::Typedef(facts.clone()),
+      _ => panic!("unhandled node type for conversion to declaration")
+    }
+  }
 }
 
 pub struct CheckerError {
@@ -132,6 +145,7 @@ pub enum CheckStatus {
   Done,
 }
 
+#[derive(Debug)]
 pub struct CheckedDeclaration {
   decl: Declaration,
 }
@@ -161,7 +175,7 @@ impl TypeCheckerState {
 
   pub fn advance(&self) -> Option<&AstNode> {
     let current_pos = self.position.get();
-    if current_pos >= self.ast.len() {
+    if current_pos + 1 >= self.ast.len() {
       return None;
     }
     self.position.set(current_pos + 1);
@@ -170,6 +184,28 @@ impl TypeCheckerState {
 
   pub fn walk_back(&self, by: usize) {
     self.position.set(self.position.get() - by);
+  }
+
+  pub fn replace_declaration(&self, name: &String, new: Declaration) {
+    let mut interior = self.declarations.borrow_mut();
+    let index = match interior.iter().position(|item| {
+      return match &item.decl {
+        Declaration::Function(facts) => facts.name == *name,
+        Declaration::Nothing => false,
+        Declaration::Trait(facts) => facts.name == *name,
+        Declaration::Typedef(facts) => facts.name == *name,
+        Declaration::Variable(facts) => facts.name == *name,
+      }
+    })
+    {
+      Some(idx) => idx,
+      None => panic!("cannot replace a declaration that does not exist.")
+    };
+
+    match interior.get_mut(index) {
+      Some(item) => *item = CheckedDeclaration{ decl: new },
+      None => panic!("cannot replace a declaration that does not exist.")
+    }
   }
 
   pub fn get_declaration(&self, name: &String) -> Ref<'_, Declaration> {
@@ -239,12 +275,19 @@ pub fn just_walk_declarations(state: &TypeCheckerState) {
           )
         })
       },
-      AstNode::Struct(_) => todo!("implement struct"),
+      AstNode::StructDeclaration(_) => todo!("implement struct"),
       _ => continue
     }
   }
 
   state.walk_back(state.position.get());
+}
+
+pub fn visit_struct(
+  state: &TypeCheckerState,
+  facts: &StructDeclarationFacts,
+) -> CheckerResult {
+  todo!("implement struct type checking");
 }
 
 pub fn visit_assignment(
@@ -313,6 +356,18 @@ pub fn visit_expressions(state: &TypeCheckerState) -> CheckStatus {
       },
       _ => todo!()
     };
+
+    return match result {
+      Ok(node) => {
+        if node != *statement {
+          return CheckStatus::Optimized(node)
+        }
+        CheckStatus::Okay
+      },
+      Err(e) => {
+        CheckStatus::Failed(e)
+      }
+    }
   }
 
   return CheckStatus::Done;
@@ -324,6 +379,27 @@ pub fn walk_ast(state: &TypeCheckerState) -> Vec<AstNode> {
   // walk declarations, so we can store them for lookups when
   // checking expressions.
   just_walk_declarations(state);
+
+  println!("typechecker: {:#?}", state.declarations);
+
+  for node in &state.ast {
+    let name: String;
+    let result = match node {
+      AstNode::Assignment(facts) => {
+        name = facts.name.clone();
+        visit_assignment(state, facts)
+      },
+      _ => todo!("implement THIS arm! {:?}", node)
+    };
+
+    match result {
+      // This node is fully done.
+      Ok(node) => state.replace_declaration(&name, Declaration::from_node(node)),
+      Err(e) => {
+        display_fatal(&e.location, &e.message);
+      }
+    }
+  }
 
   todo!("type checker");
 }

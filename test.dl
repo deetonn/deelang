@@ -1,7 +1,5 @@
-use std::env::get;
 
-fn get_environment_variable(var: string) -> Option<string> {
-    return get(var);
+struct Declaration {
+    name: String,
+    value: u32,
 }
-
-const path = get_environment_variable("PATH")

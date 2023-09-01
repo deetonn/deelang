@@ -162,8 +162,7 @@ impl Expression for I64LiteralExpression {
         Some(TypeInfo {
             name: "i64".to_owned(),
             size: 8,
-            needs_to_resolve_size: false,
-            has_been_resolved: true,
+            flags: RESOLVED_TYPE,
             generics: None,
         })
     }
@@ -173,14 +172,20 @@ impl Expression for I64LiteralExpression {
     }
 }
 
-impl I64LiteralExpression {
-    pub fn into_expr(value: i64, location: SourceLocation) -> Box<dyn Expression> {
-        Box::new(I64LiteralExpression {
-            value,
-            location
-        })
+macro_rules! impl_expr {
+    ($typename:ty, $name:ident) => {
+        impl $name {
+            pub fn into_expr(value: $typename, location: SourceLocation) -> Box<dyn Expression> {
+                Box::new($name {
+                    value,
+                    location
+                })
+            }
+        }
     }
 }
+
+impl_expr!(i64, I64LiteralExpression);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct StringLiteralExpression {
@@ -233,6 +238,21 @@ impl Expression for VariableReferenceExpression {
 
     fn get_source_location(&self) -> SourceLocation {
         self.location.clone()
+    }
+}
+
+impl VariableReferenceExpression {
+    pub fn into_expr(
+        name: String, 
+        assigne_type: Option<TypeInfo>,
+        location: SourceLocation,
+    ) -> Box<dyn Expression>
+    {
+        return Box::new(
+            VariableReferenceExpression {
+                name, assigne_type, location
+            }
+        )
     }
 }
 
@@ -322,6 +342,35 @@ impl ReturnExpression {
             value,
             location: loc
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct ChainingExpression {
+    pub variables: Vec<String>,
+    pub location: SourceLocation,
+}
+
+impl Expression for ChainingExpression {
+    fn evaluate(&self) -> ValueType {
+        ValueType::ChainExpr(self.variables.clone())
+    }
+
+    fn get_source_location(&self) -> SourceLocation {
+        self.location.clone()
+    }
+
+    fn try_evaluate_type(&self) -> Option<TypeInfo> {
+        None
+    }
+}
+
+impl ChainingExpression {
+    pub fn into_expr(facts: &ChainFacts, location: &SourceLocation) -> Box<dyn Expression> {
+        Box::new(Self {
+            variables: facts.variables.clone(),
+            location: location.clone()
+        })
     }
 }
 
